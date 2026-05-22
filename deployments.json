@@ -1,0 +1,9 @@
+{
+  "network": "arc-testnet",
+  "chainId": 5042002,
+  "usdc": "0x3600000000000000000000000000000000000000",
+  "escrow": "0xC58e83746F6924D01Da3234414f6d91eF647596F",
+  "invoiceRegistry": "0x06E5D07E471f4746B1C14de667Ef7474B701e578",
+  "deployedAt": "2026-05-21T22:55:14.075Z",
+  "deployer": "0xfAB99Fe25EDB59317A06db5B831b6B8fE0a7E879"
+}

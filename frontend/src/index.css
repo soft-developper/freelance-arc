@@ -1,0 +1,144 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #0a0b0f;
+  color: #e8eaf0;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+.app { min-height: 100vh; display: flex; flex-direction: column; }
+
+.main-content {
+  flex: 1;
+  padding: 32px 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.card {
+  background: #12141a;
+  border: 1px solid #1f2330;
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+  text-decoration: none;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: #00d4aa; color: #0a0b0f; }
+.btn-primary:hover:not(:disabled) { background: #00f0c2; }
+.btn-secondary { background: #1a1d26; color: #e8eaf0; border: 1px solid #2a3050; }
+.btn-secondary:hover:not(:disabled) { border-color: #00d4aa; }
+.btn-danger { background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+.btn-sm { padding: 7px 14px; font-size: 0.82rem; }
+.btn-lg { padding: 13px 28px; font-size: 1rem; }
+
+.input, .textarea {
+  width: 100%;
+  background: #1a1d26;
+  border: 1px solid #2a3050;
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #e8eaf0;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.input:focus, .textarea:focus {
+  border-color: #00d4aa;
+  box-shadow: 0 0 0 3px rgba(0,212,170,0.1);
+}
+.textarea { resize: vertical; min-height: 100px; }
+.label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #7a8099;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 100px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.badge-open      { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.badge-active    { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.badge-submitted { background: rgba(139,92,246,0.15); color: #8b5cf6; }
+.badge-completed { background: rgba(16,185,129,0.15); color: #10b981; }
+.badge-disputed  { background: rgba(239,68,68,0.15);  color: #ef4444; }
+.badge-cancelled { background: rgba(107,114,128,0.15);color: #6b7280; }
+
+.alert {
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  margin-bottom: 16px;
+  border: 1px solid;
+}
+.alert-error   { background: rgba(239,68,68,0.08);  border-color: rgba(239,68,68,0.3);  color: #fca5a5; }
+.alert-success { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.3); color: #6ee7b7; }
+.alert-info    { background: rgba(0,212,170,0.05);  border-color: rgba(0,212,170,0.2);  color: #00d4aa; }
+
+.divider { border: none; border-top: 1px solid #1f2330; margin: 24px 0; }
+
+.spinner {
+  width: 18px; height: 18px;
+  border: 2px solid #2a3050;
+  border-top-color: #00d4aa;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
+
+.arc-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0,212,170,0.1);
+  border: 1px solid rgba(0,212,170,0.2);
+  border-radius: 100px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  color: #00d4aa;
+}
+.arc-tag::before {
+  content: '';
+  width: 6px; height: 6px;
+  background: #00d4aa;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+
+.addr { font-family: monospace; font-size: 0.78rem; color: #7a8099; }
+.usdc-amount { font-family: monospace; font-weight: 700; }
+
+@media (max-width: 640px) {
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .main-content { padding: 16px; }
+}

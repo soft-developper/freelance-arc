@@ -1,0 +1,21 @@
+{
+  "name": "freelance-arc",
+  "version": "1.0.0",
+  "description": "Freelancer payment platform on Arc — USDC escrow + auto invoices",
+  "scripts": {
+    "compile": "npx hardhat compile",
+    "test": "npx hardhat test",
+    "deploy": "npx hardhat run scripts/deploy.js --network arc-testnet",
+    "deploy:local": "npx hardhat run scripts/deploy.js --network hardhat",
+    "verify": "npx hardhat verify --network arc-testnet",
+    "node": "npx hardhat node"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "dotenv": "^16.6.1",
+    "hardhat": "^2.22.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2"
+  }
+}
