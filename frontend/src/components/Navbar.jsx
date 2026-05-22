@@ -21,7 +21,7 @@ export default function Navbar({ wallet }) {
       <div style={{ display: "flex", alignItems: "center", gap: "32px" }}>
         <Link to="/" style={{ textDecoration: "none" }}>
           <span style={{ fontWeight: 700, fontSize: "1rem", fontFamily: "monospace" }}>
-            <span style={{ color: "#00d4aa" }}>◈</span> FreelanceArc
+            <span style={{ color: "#00d4aa" }}>◈</span> Freelance
           </span>
         </Link>
 

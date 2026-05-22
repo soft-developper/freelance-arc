@@ -23,7 +23,7 @@ export const arcTestnet = defineChain({
 });
 
 const config = getDefaultConfig({
-  appName: "FreelanceArc",
+  appName: "Freelance",
   projectId: "10478a0e7be40ec31310f7217c733ebe",
   chains: [arcTestnet],
   ssr: false,

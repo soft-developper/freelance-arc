@@ -25,7 +25,7 @@ export default function Landing({ wallet }) {
 
       <div style={{ textAlign: "center", marginBottom: 64 }}>
         <div style={{ marginBottom: 20 }}>
-          <span className="arc-tag">Built on Arc - Chain ID 5042002</span>
+          <span className="arc-tag">Built on Arc</span>
         </div>
 
         <h1 style={{ fontSize: "2.8rem", marginBottom: 20, lineHeight: 1.15 }}>
