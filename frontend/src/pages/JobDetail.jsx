@@ -9,6 +9,15 @@ const JOB_STATUS = { 0: "Open", 1: "Active", 2: "Completed", 3: "Disputed", 4: "
 const MS_STATUS  = { 0: "Pending", 1: "Submitted", 2: "Approved", 3: "Disputed" };
 const MS_COLOR   = { 0: "#7a8099", 1: "#8b5cf6", 2: "#10b981", 3: "#ef4444" };
 
+function parseJobMeta(descriptionHash) {
+  try {
+    const meta = JSON.parse(descriptionHash);
+    return meta;
+  } catch {
+    return null;
+  }
+}
+
 export default function JobDetail({ wallet }) {
   const { jobId } = useParams();
   const navigate  = useNavigate();
@@ -38,9 +47,8 @@ export default function JobDetail({ wallet }) {
   const statusLabel  = job ? (JOB_STATUS[Number(job.status)] || "Unknown") : "";
   const noFreelancer = job?.freelancer === "0x0000000000000000000000000000000000000000";
   const hasSplitProposal = job?.clientSplitPercent > 0n;
-
   const pendingMilestones = job?.milestones?.filter((ms) => Number(ms.status) !== 2) || [];
-  const allSubmitted = pendingMilestones.length > 0 && pendingMilestones.every((ms) => Number(ms.status) === 1);
+  const meta = job ? parseJobMeta(job.descriptionHash) : null;
 
   // Auto refresh job every 5 seconds
   useEffect(() => {
@@ -181,6 +189,39 @@ export default function JobDetail({ wallet }) {
               <div style={{ fontSize: "0.72rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 2 }}>Created</div>
               <span style={{ fontSize: "0.85rem" }}>{new Date(Number(job.createdAt) * 1000).toLocaleString()}</span>
             </div>
+
+            {/* Contact Info */}
+            {meta && meta.contact && (
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div style={{ fontSize: "0.72rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 6 }}>
+                  Contact Client
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{
+                    fontSize: "0.72rem", padding: "2px 10px", borderRadius: 4,
+                    background: "rgba(0,212,170,0.1)", color: "#00d4aa",
+                    textTransform: "capitalize", border: "1px solid rgba(0,212,170,0.2)",
+                  }}>
+                    {meta.contactType || "contact"}
+                  </span>
+                  <span style={{ fontSize: "0.875rem", fontFamily: "monospace", color: "#e8eaf0" }}>
+                    {meta.contact}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Description */}
+            {meta && meta.description && (
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div style={{ fontSize: "0.72rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 6 }}>
+                  Description
+                </div>
+                <p style={{ fontSize: "0.875rem", color: "#7a8099", lineHeight: 1.7 }}>
+                  {meta.description}
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -191,7 +232,6 @@ export default function JobDetail({ wallet }) {
               <h3 style={{ fontSize: "0.8rem", color: "#7a8099", textTransform: "uppercase", letterSpacing: "0.08em" }}>
                 Milestones
               </h3>
-              {/* Approve all button for client */}
               {isClient && Number(job.status) === 1 && pendingMilestones.length > 0 && (
                 <button
                   className="btn btn-primary btn-sm"
@@ -237,7 +277,6 @@ export default function JobDetail({ wallet }) {
                       </span>
                     </div>
 
-                    {/* Show deliverable hash if submitted */}
                     {ms.deliverableHash && (
                       <div style={{ padding: "8px 12px", background: "#0a0b0f", borderRadius: 6, marginBottom: 10 }}>
                         <div style={{ fontSize: "0.68rem", color: "#4a5068", marginBottom: 2 }}>DELIVERABLE</div>
@@ -268,7 +307,7 @@ export default function JobDetail({ wallet }) {
                       </div>
                     )}
 
-                    {/* Client: Approve or request revision on submitted milestone */}
+                    {/* Client: Approve or request revision */}
                     {isClient && Number(job.status) === 1 && msStatus === 1 && (
                       <div style={{ marginTop: 8 }}>
                         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
@@ -286,7 +325,6 @@ export default function JobDetail({ wallet }) {
                             Request Revision
                           </button>
                         </div>
-
                         {showRevision[i] && (
                           <div style={{ display: "flex", gap: 8 }}>
                             <input
@@ -391,7 +429,11 @@ export default function JobDetail({ wallet }) {
                 <button
                   className="btn btn-secondary"
                   style={{ whiteSpace: "nowrap" }}
-                  onClick={() => { if (!chatMsg.trim()) return; act((c) => c.addDisputeMessage(BigInt(jobId), chatMsg)); setChatMsg(""); }}
+                  onClick={() => {
+                    if (!chatMsg.trim()) return;
+                    act((c) => c.addDisputeMessage(BigInt(jobId), chatMsg));
+                    setChatMsg("");
+                  }}
                   disabled={actionLoading || !chatMsg.trim()}
                 >
                   Send
@@ -466,26 +508,38 @@ export default function JobDetail({ wallet }) {
         <div className="card">
           <h3 style={{ fontSize: "0.8rem", color: "#7a8099", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14 }}>Actions</h3>
 
-          {/* Accept job */}
           {!isClient && !isFreelancer && Number(job.status) === 0 && (
             <div>
               <p style={{ fontSize: "0.875rem", color: "#7a8099", marginBottom: 12 }}>
                 Funds are locked in escrow. Accept this job to start working on the milestones.
               </p>
+              {meta && meta.contact && (
+                <div style={{ marginBottom: 14, padding: "10px 14px", background: "rgba(0,212,170,0.05)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 8 }}>
+                  <div style={{ fontSize: "0.72rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 4 }}>Contact client before accepting</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{
+                      fontSize: "0.72rem", padding: "2px 10px", borderRadius: 4,
+                      background: "rgba(0,212,170,0.1)", color: "#00d4aa",
+                      textTransform: "capitalize", border: "1px solid rgba(0,212,170,0.2)",
+                    }}>
+                      {meta.contactType || "contact"}
+                    </span>
+                    <span style={{ fontSize: "0.875rem", fontFamily: "monospace" }}>{meta.contact}</span>
+                  </div>
+                </div>
+              )}
               <button className="btn btn-primary" onClick={() => act((c) => c.acceptJob(BigInt(jobId)))} disabled={actionLoading}>
                 {actionLoading ? <><span className="spinner" /> Processing...</> : "Accept Job"}
               </button>
             </div>
           )}
 
-          {/* Active job info for freelancer */}
           {isFreelancer && Number(job.status) === 1 && (
             <div className="alert alert-info">
               Submit each milestone above as you complete it. The client will review and release payment per milestone.
             </div>
           )}
 
-          {/* Active job info for client */}
           {isClient && Number(job.status) === 1 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div className="alert alert-info">
@@ -516,7 +570,6 @@ export default function JobDetail({ wallet }) {
             </div>
           )}
 
-          {/* Cancel open job */}
           {isClient && Number(job.status) === 0 && (
             <button className="btn btn-danger btn-sm" onClick={() => act((c) => c.cancelJob(BigInt(jobId)))} disabled={actionLoading}>
               Cancel and Refund

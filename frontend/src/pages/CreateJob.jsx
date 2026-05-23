@@ -9,6 +9,8 @@ export default function CreateJob({ wallet }) {
   const [form, setForm] = useState({
     title: "",
     description: "",
+    contact: "",
+    contactType: "email",
     milestones: [{ description: "", amount: "" }],
   });
 
@@ -24,13 +26,20 @@ export default function CreateJob({ wallet }) {
 
   const handleSubmit = async () => {
     if (!form.title.trim()) return alert("Enter a job title");
+    if (!form.contact.trim()) return alert("Enter a contact so freelancers can reach you");
     if (form.milestones.some((m) => !m.description.trim() || !m.amount)) {
       return alert("Fill all milestone fields");
     }
     try {
+      // Store contact in descHash field as JSON
+      const descHash = JSON.stringify({
+        description: form.description,
+        contact: form.contact,
+        contactType: form.contactType,
+      });
       await createJob({
         title: form.title,
-        descHash: "",
+        descHash,
         milestones: form.milestones,
       });
       navigate("/dashboard");
@@ -55,6 +64,8 @@ export default function CreateJob({ wallet }) {
       )}
 
       <div className="card">
+
+        {/* Title */}
         <div className="form-group">
           <label className="label">Job Title *</label>
           <input
@@ -65,6 +76,7 @@ export default function CreateJob({ wallet }) {
           />
         </div>
 
+        {/* Description */}
         <div className="form-group">
           <label className="label">Description</label>
           <textarea
@@ -75,8 +87,45 @@ export default function CreateJob({ wallet }) {
           />
         </div>
 
+        {/* Contact */}
+        <div className="form-group">
+          <label className="label">Contact Me *</label>
+          <p style={{ fontSize: "0.78rem", color: "#7a8099", marginBottom: 8 }}>
+            Freelancers will use this to reach you about the job.
+          </p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <select
+              className="input"
+              style={{ width: 140, flexShrink: 0 }}
+              value={form.contactType}
+              onChange={(e) => setForm((f) => ({ ...f, contactType: e.target.value }))}
+            >
+              <option value="email">Email</option>
+              <option value="github">GitHub</option>
+              <option value="telegram">Telegram</option>
+              <option value="twitter">Twitter / X</option>
+              <option value="discord">Discord</option>
+              <option value="other">Other</option>
+            </select>
+            <input
+              className="input"
+              placeholder={
+                form.contactType === "email"    ? "you@example.com" :
+                form.contactType === "github"   ? "github.com/yourusername" :
+                form.contactType === "telegram" ? "@yourusername" :
+                form.contactType === "twitter"  ? "@yourusername" :
+                form.contactType === "discord"  ? "username#0000" :
+                "Your contact info"
+              }
+              value={form.contact}
+              onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))}
+            />
+          </div>
+        </div>
+
         <hr className="divider" />
 
+        {/* Milestones */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h3 style={{ fontSize: "0.875rem", color: "#7a8099", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             Milestones
@@ -137,6 +186,7 @@ export default function CreateJob({ wallet }) {
 
         <hr className="divider" />
 
+        {/* Summary */}
         <div style={{ background: "#1a1d26", borderRadius: 8, padding: 16, marginBottom: 20 }}>
           {[
             { label: "Total to freelancer", value: total.toFixed(2) + " USDC" },
