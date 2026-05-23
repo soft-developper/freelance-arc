@@ -1,29 +1,26 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useEscrow } from "../hooks/useEscrow";
-import { formatUSDC, JOB_STATUS, shortAddr, ARC_TESTNET, CONTRACTS } from "../utils/arc";
+import { formatUSDC, shortAddr, ARC_TESTNET, CONTRACTS } from "../utils/arc";
 import { ethers } from "ethers";
 import { ESCROW_ABI } from "../abi";
 
-const JOB_STATUS_EXTENDED = {
-  0: "Open",
-  1: "Active",
-  2: "Submitted",
-  3: "Completed",
-  4: "Disputed",
-  5: "Refunded",
-  6: "Cancelled",
-  7: "Revision",
-};
+const JOB_STATUS = { 0: "Open", 1: "Active", 2: "Completed", 3: "Disputed", 4: "Cancelled" };
+const MS_STATUS  = { 0: "Pending", 1: "Submitted", 2: "Approved", 3: "Disputed" };
+const MS_COLOR   = { 0: "#7a8099", 1: "#8b5cf6", 2: "#10b981", 3: "#ef4444" };
 
 export default function JobDetail({ wallet }) {
   const { jobId } = useParams();
   const navigate  = useNavigate();
-  const { getJob, loading, txHash, error } = useEscrow(wallet.signer);
+  const {
+    getJob, loading, txHash, error,
+    acceptJob, submitMilestone, approveMilestone, approveAllMilestones,
+    requestMilestoneRevision, raiseDispute, proposeSplit, acceptSplit,
+    addDisputeMessage, cancelJob, claimMilestoneAfterTimeout,
+  } = useEscrow(wallet.signer);
 
   const [job, setJob]                           = useState(null);
   const [fetchError, setFetchError]             = useState(null);
-  const [deliverableHash, setDeliverableHash]   = useState("");
   const [refresh, setRefresh]                   = useState(0);
   const [disputeMessages, setDisputeMessages]   = useState([]);
   const [chatMsg, setChatMsg]                   = useState("");
@@ -32,14 +29,18 @@ export default function JobDetail({ wallet }) {
   const [actionLoading, setActionLoading]       = useState(false);
   const [actionError, setActionError]           = useState(null);
   const [actionTx, setActionTx]                 = useState(null);
-  const [revisionFeedback, setRevisionFeedback] = useState("");
+  const [milestoneInputs, setMilestoneInputs]   = useState({});
+  const [revisionInputs, setRevisionInputs]     = useState({});
+  const [showRevision, setShowRevision]         = useState({});
 
   const isClient     = job?.client?.toLowerCase()     === wallet.address?.toLowerCase();
   const isFreelancer = job?.freelancer?.toLowerCase() === wallet.address?.toLowerCase();
-  const statusLabel  = job ? (JOB_STATUS_EXTENDED[Number(job.status)] || "Unknown") : "";
+  const statusLabel  = job ? (JOB_STATUS[Number(job.status)] || "Unknown") : "";
   const noFreelancer = job?.freelancer === "0x0000000000000000000000000000000000000000";
-  const timeoutPassed = job?.submittedAt > 0n && Date.now() / 1000 > Number(job.submittedAt) + 7 * 24 * 3600;
   const hasSplitProposal = job?.clientSplitPercent > 0n;
+
+  const pendingMilestones = job?.milestones?.filter((ms) => Number(ms.status) !== 2) || [];
+  const allSubmitted = pendingMilestones.length > 0 && pendingMilestones.every((ms) => Number(ms.status) === 1);
 
   // Auto refresh job every 5 seconds
   useEffect(() => {
@@ -49,24 +50,20 @@ export default function JobDetail({ wallet }) {
       getJob(BigInt(jobId))
         .then((data) => {
           if (!data) setFetchError("Job not found on chain");
-          else {
-            setJob(data);
-            setFetchError(null);
-          }
+          else { setJob(data); setFetchError(null); }
         })
         .catch((e) => setFetchError(e.message));
     }
 
     setJob(null);
     fetchJob();
-
     const interval = setInterval(fetchJob, 5000);
     return () => clearInterval(interval);
   }, [jobId, refresh, wallet.signer]);
 
   // Auto refresh dispute messages every 5 seconds
   useEffect(() => {
-    if (!wallet.signer || !job || Number(job.status) !== 4) return;
+    if (!wallet.signer || !job || Number(job.status) !== 3) return;
 
     async function loadMessages() {
       try {
@@ -74,12 +71,11 @@ export default function JobDetail({ wallet }) {
         const contract = new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, provider);
         const filter   = contract.filters.DisputeMessage(BigInt(jobId));
         const events   = await contract.queryFilter(filter, -10000);
-        const msgs = events.map((e) => ({
+        setDisputeMessages(events.map((e) => ({
           sender:    e.args.sender,
           message:   e.args.message,
           timestamp: Number(e.args.timestamp),
-        }));
-        setDisputeMessages(msgs);
+        })));
       } catch (e) {
         console.error("Load messages error:", e.message);
       }
@@ -170,85 +166,176 @@ export default function JobDetail({ wallet }) {
             </div>
             <div>
               <div style={{ fontSize: "0.72rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 2 }}>Freelancer</div>
-              {noFreelancer
-                ? <span style={{ color: "#4a5068" }}>None yet</span>
-                : <span className="addr">{shortAddr(job.freelancer)}</span>
-              }
+              {noFreelancer ? <span style={{ color: "#4a5068" }}>None yet</span> : <span className="addr">{shortAddr(job.freelancer)}</span>}
               {isFreelancer && <span style={{ marginLeft: 6, fontSize: "0.7rem", color: "#00d4aa" }}>(you)</span>}
             </div>
             <div>
-              <div style={{ fontSize: "0.72rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 2 }}>Amount</div>
+              <div style={{ fontSize: "0.72rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 2 }}>Total Amount</div>
               <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{formatUSDC(job.totalAmount)} USDC</span>
             </div>
             <div>
-              <div style={{ fontSize: "0.72rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 2 }}>Platform Fee</div>
-              <span style={{ fontFamily: "monospace", color: "#7a8099" }}>{formatUSDC(job.platformFee)} USDC</span>
+              <div style={{ fontSize: "0.72rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 2 }}>Status</div>
+              <span className={"badge badge-" + statusLabel.toLowerCase()}>{statusLabel}</span>
             </div>
             <div>
               <div style={{ fontSize: "0.72rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 2 }}>Created</div>
               <span style={{ fontSize: "0.85rem" }}>{new Date(Number(job.createdAt) * 1000).toLocaleString()}</span>
             </div>
-            <div>
-              <div style={{ fontSize: "0.72rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 2 }}>Submitted</div>
-              <span style={{ fontSize: "0.85rem" }}>{job.submittedAt > 0n ? new Date(Number(job.submittedAt) * 1000).toLocaleString() : "Not yet"}</span>
-            </div>
           </div>
-
-          {job.deliverableHash && (
-            <div style={{ marginTop: 14, padding: "10px 14px", background: "#1a1d26", borderRadius: 6 }}>
-              <div style={{ fontSize: "0.72rem", color: "#4a5068", marginBottom: 2 }}>DELIVERABLE HASH</div>
-              <span style={{ fontFamily: "monospace", fontSize: "0.78rem", wordBreak: "break-all", color: "#00d4aa" }}>
-                {job.deliverableHash}
-              </span>
-            </div>
-          )}
         </div>
 
         {/* Milestones */}
         {job.milestones?.length > 0 && (
           <div className="card">
-            <h3 style={{ fontSize: "0.8rem", color: "#7a8099", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14 }}>Milestones</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {job.milestones.map((ms, i) => (
-                <div key={i} style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  padding: "10px 14px", background: "#1a1d26", borderRadius: 6,
-                  border: "1px solid " + (ms.released ? "rgba(16,185,129,0.3)" : "#1f2330"),
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{
-                      width: 22, height: 22, borderRadius: "50%", display: "flex",
-                      alignItems: "center", justifyContent: "center", fontSize: "0.65rem",
-                      fontFamily: "monospace",
-                      background: ms.released ? "rgba(16,185,129,0.15)" : "#0a0b0f",
-                      color: ms.released ? "#10b981" : "#4a5068",
-                      border: "1px solid " + (ms.released ? "rgba(16,185,129,0.4)" : "#1f2330"),
-                    }}>
-                      {ms.released ? "✓" : i + 1}
-                    </span>
-                    <span style={{ fontSize: "0.875rem" }}>{ms.description}</span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontFamily: "monospace", fontSize: "0.85rem" }}>{formatUSDC(ms.amount)} USDC</span>
-                    {isClient && !ms.released && Number(job.status) === 1 && (
-                      <button
-                        className="btn btn-sm"
-                        style={{ background: "rgba(16,185,129,0.1)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}
-                        onClick={() => act((c) => c.releaseMilestone(BigInt(jobId), i))}
-                        disabled={actionLoading}
-                      >
-                        Release
-                      </button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ fontSize: "0.8rem", color: "#7a8099", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Milestones
+              </h3>
+              {/* Approve all button for client */}
+              {isClient && Number(job.status) === 1 && pendingMilestones.length > 0 && (
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => act((c) => c.approveAllMilestones(BigInt(jobId)))}
+                  disabled={actionLoading}
+                >
+                  Release All Remaining USDC
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {job.milestones.map((ms, i) => {
+                const msStatus    = Number(ms.status);
+                const statusText  = MS_STATUS[msStatus] || "Unknown";
+                const statusColor = MS_COLOR[msStatus] || "#7a8099";
+                const timeoutPassed = ms.submittedAt > 0n && Date.now() / 1000 > Number(ms.submittedAt) + 7 * 24 * 3600;
+
+                return (
+                  <div key={i} style={{
+                    background: "#1a1d26", borderRadius: 10, padding: 16,
+                    border: "1px solid " + (msStatus === 2 ? "rgba(16,185,129,0.3)" : msStatus === 1 ? "rgba(139,92,246,0.3)" : "#2a3050"),
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{
+                          width: 26, height: 26, borderRadius: "50%", display: "flex",
+                          alignItems: "center", justifyContent: "center", fontSize: "0.7rem",
+                          fontFamily: "monospace", flexShrink: 0,
+                          background: msStatus === 2 ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.05)",
+                          color: statusColor,
+                          border: "1px solid " + statusColor + "44",
+                        }}>
+                          {msStatus === 2 ? "✓" : i + 1}
+                        </span>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{ms.description}</div>
+                          <div style={{ fontSize: "0.72rem", color: statusColor, marginTop: 2 }}>{statusText}</div>
+                        </div>
+                      </div>
+                      <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: "0.9rem" }}>
+                        {formatUSDC(ms.amount)} USDC
+                      </span>
+                    </div>
+
+                    {/* Show deliverable hash if submitted */}
+                    {ms.deliverableHash && (
+                      <div style={{ padding: "8px 12px", background: "#0a0b0f", borderRadius: 6, marginBottom: 10 }}>
+                        <div style={{ fontSize: "0.68rem", color: "#4a5068", marginBottom: 2 }}>DELIVERABLE</div>
+                        <span style={{ fontFamily: "monospace", fontSize: "0.75rem", wordBreak: "break-all", color: "#00d4aa" }}>
+                          {ms.deliverableHash}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Freelancer: Submit this milestone */}
+                    {isFreelancer && Number(job.status) === 1 && msStatus === 0 && (
+                      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                        <input
+                          className="input"
+                          placeholder="Paste deliverable link or IPFS hash..."
+                          value={milestoneInputs[i] || ""}
+                          onChange={(e) => setMilestoneInputs((prev) => ({ ...prev, [i]: e.target.value }))}
+                          style={{ fontSize: "0.82rem" }}
+                        />
+                        <button
+                          className="btn btn-primary btn-sm"
+                          style={{ whiteSpace: "nowrap" }}
+                          onClick={() => act((c) => c.submitMilestone(BigInt(jobId), i, milestoneInputs[i] || ""))}
+                          disabled={actionLoading || !milestoneInputs[i]?.trim()}
+                        >
+                          Submit
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Client: Approve or request revision on submitted milestone */}
+                    {isClient && Number(job.status) === 1 && msStatus === 1 && (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => act((c) => c.approveMilestone(BigInt(jobId), i))}
+                            disabled={actionLoading}
+                          >
+                            Approve and Release {formatUSDC(ms.amount)} USDC
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setShowRevision((prev) => ({ ...prev, [i]: !prev[i] }))}
+                          >
+                            Request Revision
+                          </button>
+                        </div>
+
+                        {showRevision[i] && (
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <input
+                              className="input"
+                              placeholder="Explain what needs to be changed..."
+                              value={revisionInputs[i] || ""}
+                              onChange={(e) => setRevisionInputs((prev) => ({ ...prev, [i]: e.target.value }))}
+                              style={{ fontSize: "0.82rem" }}
+                            />
+                            <button
+                              className="btn btn-danger btn-sm"
+                              style={{ whiteSpace: "nowrap" }}
+                              onClick={() => {
+                                act((c) => c.requestMilestoneRevision(BigInt(jobId), i, revisionInputs[i] || ""));
+                                setShowRevision((prev) => ({ ...prev, [i]: false }));
+                              }}
+                              disabled={actionLoading || !revisionInputs[i]?.trim()}
+                            >
+                              Send Back
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Freelancer: Claim after timeout */}
+                    {isFreelancer && msStatus === 1 && timeoutPassed && (
+                      <div style={{ marginTop: 8 }}>
+                        <div className="alert alert-info" style={{ marginBottom: 8, fontSize: "0.8rem" }}>
+                          Client has not responded in 7 days. You can claim this milestone.
+                        </div>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => act((c) => c.claimMilestoneAfterTimeout(BigInt(jobId), i))}
+                          disabled={actionLoading}
+                        >
+                          Claim {formatUSDC(ms.amount)} USDC
+                        </button>
+                      </div>
                     )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
         {/* Dispute Chat */}
-        {Number(job.status) === 4 && (
+        {Number(job.status) === 3 && (
           <div className="card" style={{ border: "1px solid rgba(239,68,68,0.3)" }}>
             <h3 style={{ fontSize: "0.8rem", color: "#ef4444", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 16 }}>
               Dispute Chat
@@ -260,9 +347,7 @@ export default function JobDetail({ wallet }) {
               marginBottom: 16, display: "flex", flexDirection: "column", gap: 10,
             }}>
               {disputeMessages.length === 0 ? (
-                <p style={{ color: "#4a5068", fontSize: "0.82rem", textAlign: "center" }}>
-                  No messages yet. Start the conversation.
-                </p>
+                <p style={{ color: "#4a5068", fontSize: "0.82rem", textAlign: "center" }}>No messages yet. Start the conversation.</p>
               ) : (
                 disputeMessages.map((msg, i) => {
                   const isMe = msg.sender.toLowerCase() === wallet.address?.toLowerCase();
@@ -306,11 +391,7 @@ export default function JobDetail({ wallet }) {
                 <button
                   className="btn btn-secondary"
                   style={{ whiteSpace: "nowrap" }}
-                  onClick={() => {
-                    if (!chatMsg.trim()) return;
-                    act((c) => c.addDisputeMessage(BigInt(jobId), chatMsg));
-                    setChatMsg("");
-                  }}
+                  onClick={() => { if (!chatMsg.trim()) return; act((c) => c.addDisputeMessage(BigInt(jobId), chatMsg)); setChatMsg(""); }}
                   disabled={actionLoading || !chatMsg.trim()}
                 >
                   Send
@@ -319,40 +400,17 @@ export default function JobDetail({ wallet }) {
             )}
 
             <hr className="divider" />
-
             <h4 style={{ fontSize: "0.78rem", color: "#7a8099", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14 }}>
               Resolution Options
             </h4>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-
               {isClient && (
                 <div style={{ padding: 14, background: "rgba(16,185,129,0.05)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8 }}>
-                  <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 4, color: "#10b981" }}>Approve Work</div>
-                  <p style={{ fontSize: "0.8rem", color: "#7a8099", marginBottom: 10 }}>Satisfied after discussion? Release full USDC to freelancer.</p>
-                  <button className="btn btn-primary btn-sm" onClick={() => act((c) => c.approveDeliverable(BigInt(jobId)))} disabled={actionLoading}>
-                    Approve and Release Full USDC
-                  </button>
-                </div>
-              )}
-
-              {isClient && (
-                <div style={{ padding: 14, background: "rgba(59,130,246,0.05)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 8 }}>
-                  <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 4, color: "#3b82f6" }}>Request Revision</div>
-                  <p style={{ fontSize: "0.8rem", color: "#7a8099", marginBottom: 10 }}>Send job back so freelancer can resubmit improved work.</p>
-                  <textarea
-                    className="textarea"
-                    placeholder="Explain what needs to be changed..."
-                    value={revisionFeedback}
-                    onChange={(e) => setRevisionFeedback(e.target.value)}
-                    style={{ minHeight: 70, marginBottom: 10 }}
-                  />
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => act((c) => c.requestRevision(BigInt(jobId), revisionFeedback))}
-                    disabled={actionLoading || !revisionFeedback.trim()}
-                  >
-                    Send Back for Revision
+                  <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 4, color: "#10b981" }}>Release All Remaining USDC</div>
+                  <p style={{ fontSize: "0.8rem", color: "#7a8099", marginBottom: 10 }}>Satisfied after discussion? Release all remaining funds to freelancer.</p>
+                  <button className="btn btn-primary btn-sm" onClick={() => act((c) => c.approveAllMilestones(BigInt(jobId)))} disabled={actionLoading}>
+                    Approve and Release All
                   </button>
                 </div>
               )}
@@ -361,7 +419,7 @@ export default function JobDetail({ wallet }) {
                 <div style={{ padding: 14, background: "rgba(245,158,11,0.05)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 8 }}>
                   <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 4, color: "#f59e0b" }}>Propose Split Payment</div>
                   <p style={{ fontSize: "0.8rem", color: "#7a8099", marginBottom: 10 }}>
-                    Freelancer gets {splitPercent}% — you get back {100 - splitPercent}%
+                    Freelancer gets {splitPercent}% of remaining — you get back {100 - splitPercent}%
                   </p>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
                     <span style={{ fontSize: "0.8rem", color: "#7a8099" }}>Freelancer gets:</span>
@@ -387,8 +445,8 @@ export default function JobDetail({ wallet }) {
               {isFreelancer && hasSplitProposal && (
                 <div style={{ padding: 14, background: "rgba(245,158,11,0.05)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 8 }}>
                   <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 4, color: "#f59e0b" }}>Split Payment Proposed</div>
-                  <p style={{ fontSize: "0.8rem", color: "#7a8099", marginBottom: 4 }}>
-                    Client proposes: You receive {100 - Number(job.clientSplitPercent)}% of the total.
+                  <p style={{ fontSize: "0.8rem", color: "#7a8099", marginBottom: 10 }}>
+                    Client proposes you receive {100 - Number(job.clientSplitPercent)}% of remaining funds.
                   </p>
                   <button
                     className="btn btn-sm"
@@ -400,64 +458,52 @@ export default function JobDetail({ wallet }) {
                   </button>
                 </div>
               )}
-
             </div>
           </div>
         )}
 
-        {/* Normal Actions */}
+        {/* Actions */}
         <div className="card">
           <h3 style={{ fontSize: "0.8rem", color: "#7a8099", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14 }}>Actions</h3>
 
+          {/* Accept job */}
           {!isClient && !isFreelancer && Number(job.status) === 0 && (
             <div>
-              <p style={{ fontSize: "0.875rem", color: "#7a8099", marginBottom: 12 }}>Funds are locked in escrow. Accept this job to start working.</p>
+              <p style={{ fontSize: "0.875rem", color: "#7a8099", marginBottom: 12 }}>
+                Funds are locked in escrow. Accept this job to start working on the milestones.
+              </p>
               <button className="btn btn-primary" onClick={() => act((c) => c.acceptJob(BigInt(jobId)))} disabled={actionLoading}>
                 {actionLoading ? <><span className="spinner" /> Processing...</> : "Accept Job"}
               </button>
             </div>
           )}
 
-          {isFreelancer && (Number(job.status) === 1 || Number(job.status) === 7) && (
-            <div>
-              <label className="label">{Number(job.status) === 7 ? "Resubmit Deliverable Hash" : "Deliverable Hash"}</label>
-              {Number(job.status) === 7 && (
-                <div className="alert alert-info" style={{ marginBottom: 10 }}>Client requested a revision. Submit your updated work.</div>
-              )}
-              <div style={{ display: "flex", gap: 8 }}>
-                <input
-                  className="input"
-                  placeholder="QmYourIPFSHash..."
-                  value={deliverableHash}
-                  onChange={(e) => setDeliverableHash(e.target.value)}
-                />
-                <button
-                  className="btn btn-primary"
-                  style={{ whiteSpace: "nowrap" }}
-                  onClick={() => act((c) => c.submitDeliverable(BigInt(jobId), deliverableHash))}
-                  disabled={actionLoading || !deliverableHash.trim()}
-                >
-                  Submit
-                </button>
-              </div>
+          {/* Active job info for freelancer */}
+          {isFreelancer && Number(job.status) === 1 && (
+            <div className="alert alert-info">
+              Submit each milestone above as you complete it. The client will review and release payment per milestone.
             </div>
           )}
 
-          {isClient && Number(job.status) === 2 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <button className="btn btn-primary" onClick={() => act((c) => c.approveDeliverable(BigInt(jobId)))} disabled={actionLoading}>
-                {actionLoading ? <><span className="spinner" /> Processing...</> : "Approve and Release USDC"}
-              </button>
-              <div style={{ padding: 14, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8 }}>
-                <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 6, color: "#ef4444" }}>Not satisfied?</div>
-                <textarea
-                  className="textarea"
-                  placeholder="Explain the issue to start a dispute..."
-                  value={disputeReason}
-                  onChange={(e) => setDisputeReason(e.target.value)}
-                  style={{ minHeight: 70, marginBottom: 10 }}
-                />
-                <div style={{ display: "flex", gap: 8 }}>
+          {/* Active job info for client */}
+          {isClient && Number(job.status) === 1 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className="alert alert-info">
+                Review each submitted milestone above and approve or request revision. You can also release all remaining funds at once using the button above.
+              </div>
+              {pendingMilestones.length > 0 && (
+                <div style={{ padding: 14, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8 }}>
+                  <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 6, color: "#ef4444" }}>Raise a Dispute</div>
+                  <p style={{ fontSize: "0.8rem", color: "#7a8099", marginBottom: 10 }}>
+                    Use this only if you cannot resolve the issue through milestone revisions.
+                  </p>
+                  <textarea
+                    className="textarea"
+                    placeholder="Explain the issue..."
+                    value={disputeReason}
+                    onChange={(e) => setDisputeReason(e.target.value)}
+                    style={{ minHeight: 70, marginBottom: 10 }}
+                  />
                   <button
                     className="btn btn-danger btn-sm"
                     onClick={() => act((c) => c.raiseDispute(BigInt(jobId), disputeReason))}
@@ -465,36 +511,20 @@ export default function JobDetail({ wallet }) {
                   >
                     Raise Dispute
                   </button>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => act((c) => c.requestRevision(BigInt(jobId), disputeReason))}
-                    disabled={actionLoading || !disputeReason.trim()}
-                  >
-                    Request Revision Only
-                  </button>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
+          {/* Cancel open job */}
           {isClient && Number(job.status) === 0 && (
             <button className="btn btn-danger btn-sm" onClick={() => act((c) => c.cancelJob(BigInt(jobId)))} disabled={actionLoading}>
               Cancel and Refund
             </button>
           )}
 
-          {isFreelancer && Number(job.status) === 2 && timeoutPassed && (
-            <div>
-              <div className="alert alert-info" style={{ marginBottom: 10 }}>Client has not responded in 7 days. You can claim your payment.</div>
-              <button className="btn btn-primary" onClick={() => act((c) => c.claimAfterTimeout(BigInt(jobId)))} disabled={actionLoading}>
-                Claim Payment
-              </button>
-            </div>
-          )}
-
-          {Number(job.status) === 3 && <div className="alert alert-success">Job completed. USDC has been released to the freelancer.</div>}
-          {Number(job.status) === 6 && <div className="alert alert-error">This job was cancelled.</div>}
-          {Number(job.status) === 7 && !isFreelancer && <div className="alert alert-info">Waiting for freelancer to resubmit revised work.</div>}
+          {Number(job.status) === 2 && <div className="alert alert-success">Job completed. All milestones approved and USDC released to freelancer.</div>}
+          {Number(job.status) === 4 && <div className="alert alert-error">This job was cancelled.</div>}
         </div>
 
       </div>

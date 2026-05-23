@@ -54,12 +54,10 @@ export function useEscrow(signer) {
     try {
       const address   = await signer.getAddress();
       const allowance = await usdcContract.allowance(address, CONTRACTS.ESCROW);
-
       if (allowance < deposit) {
         const approveTx = await usdcContract.approve(CONTRACTS.ESCROW, deposit);
         await approveTx.wait();
       }
-
       const tx = await escrowContract.createJob(title, descHash || "", descs, amounts);
       setTxHash(tx.hash);
       await tx.wait();
@@ -72,17 +70,17 @@ export function useEscrow(signer) {
     }
   }, [signer]);
 
-  const acceptJob          = useCallback((jobId) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).acceptJob(jobId)), [signer, exec]);
-  const submitDeliverable  = useCallback((jobId, hash) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).submitDeliverable(jobId, hash)), [signer, exec]);
-  const approveDeliverable = useCallback((jobId) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).approveDeliverable(jobId)), [signer, exec]);
-  const releaseMilestone   = useCallback((jobId, i) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).releaseMilestone(jobId, i)), [signer, exec]);
-  const raiseDispute       = useCallback((jobId, reason) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).raiseDispute(jobId, reason)), [signer, exec]);
-  const requestRevision    = useCallback((jobId, feedback) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).requestRevision(jobId, feedback)), [signer, exec]);
-  const proposeSplit       = useCallback((jobId, percent) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).proposeSplit(jobId, percent)), [signer, exec]);
-  const acceptSplit        = useCallback((jobId) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).acceptSplit(jobId)), [signer, exec]);
-  const addDisputeMessage  = useCallback((jobId, msg) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).addDisputeMessage(jobId, msg)), [signer, exec]);
-  const cancelJob          = useCallback((jobId) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).cancelJob(jobId)), [signer, exec]);
-  const claimAfterTimeout  = useCallback((jobId) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).claimAfterTimeout(jobId)), [signer, exec]);
+  const acceptJob                  = useCallback((jobId) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).acceptJob(jobId)), [signer, exec]);
+  const submitMilestone            = useCallback((jobId, i, hash) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).submitMilestone(jobId, i, hash)), [signer, exec]);
+  const approveMilestone           = useCallback((jobId, i) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).approveMilestone(jobId, i)), [signer, exec]);
+  const approveAllMilestones       = useCallback((jobId) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).approveAllMilestones(jobId)), [signer, exec]);
+  const requestMilestoneRevision   = useCallback((jobId, i, feedback) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).requestMilestoneRevision(jobId, i, feedback)), [signer, exec]);
+  const raiseDispute               = useCallback((jobId, reason) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).raiseDispute(jobId, reason)), [signer, exec]);
+  const proposeSplit               = useCallback((jobId, percent) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).proposeSplit(jobId, percent)), [signer, exec]);
+  const acceptSplit                = useCallback((jobId) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).acceptSplit(jobId)), [signer, exec]);
+  const addDisputeMessage          = useCallback((jobId, msg) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).addDisputeMessage(jobId, msg)), [signer, exec]);
+  const cancelJob                  = useCallback((jobId) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).cancelJob(jobId)), [signer, exec]);
+  const claimMilestoneAfterTimeout = useCallback((jobId, i) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).claimMilestoneAfterTimeout(jobId, i)), [signer, exec]);
 
   const getJob = useCallback(async (jobId) => {
     if (!provider) return null;
@@ -130,9 +128,10 @@ export function useEscrow(signer) {
 
   return {
     loading, txHash, error,
-    createJob, acceptJob, submitDeliverable, approveDeliverable,
-    releaseMilestone, raiseDispute, requestRevision, proposeSplit,
-    acceptSplit, addDisputeMessage, cancelJob, claimAfterTimeout,
-    getJob, getClientJobs, getFreelancerJobs, getUSDCBalance,
+    createJob, acceptJob, submitMilestone, approveMilestone,
+    approveAllMilestones, requestMilestoneRevision, raiseDispute,
+    proposeSplit, acceptSplit, addDisputeMessage, cancelJob,
+    claimMilestoneAfterTimeout, getJob, getClientJobs,
+    getFreelancerJobs, getUSDCBalance,
   };
 }
