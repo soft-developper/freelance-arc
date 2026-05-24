@@ -4,24 +4,24 @@ import { ethers } from "ethers";
 import { CONTRACTS, formatUSDC, shortAddr, ARC_TESTNET } from "../utils/arc";
 import { ESCROW_ABI } from "../abi";
 
-const JOB_STATUS  = { 0: "Open", 1: "Active", 2: "Completed", 3: "Disputed", 4: "Cancelled" };
-const MS_STATUS   = { 0: "Pending", 1: "Submitted", 2: "Approved", 3: "Disputed" };
+const JOB_STATUS = { 0: "Open", 1: "Active", 2: "Completed", 3: "Disputed", 4: "Cancelled" };
+const MS_STATUS  = { 0: "Pending", 1: "Submitted", 2: "Approved", 3: "Disputed" };
 
 function parseJob(raw, jobId) {
   return {
     jobId,
-    id:           raw.id,
-    client:       raw.client,
-    freelancer:   raw.freelancer,
-    totalAmount:  raw.totalAmount,
-    platformFee:  raw.platformFee,
-    title:        raw.title,
+    id:              raw.id,
+    client:          raw.client,
+    freelancer:      raw.freelancer,
+    totalAmount:     raw.totalAmount,
+    platformFee:     raw.platformFee,
+    title:           raw.title,
     descriptionHash: raw.descriptionHash,
-    status:       raw.status,
-    createdAt:    raw.createdAt,
-    disputedAt:   raw.disputedAt,
+    status:          raw.status,
+    createdAt:       raw.createdAt,
+    disputedAt:      raw.disputedAt,
     clientSplitPercent: raw.clientSplitPercent,
-    milestones:   raw.milestones ? raw.milestones.map((ms) => ({
+    milestones: raw.milestones ? raw.milestones.map((ms) => ({
       description:     ms.description,
       amount:          ms.amount,
       status:          ms.status,
@@ -32,18 +32,18 @@ function parseJob(raw, jobId) {
 }
 
 export default function Admin({ wallet }) {
-  const [stats, setStats]               = useState(null);
-  const [allJobs, setAllJobs]           = useState([]);
-  const [disputedJobs, setDisputedJobs] = useState([]);
-  const [loading, setLoading]           = useState(true);
-  const [tab, setTab]                   = useState("overview");
-  const [actionLoading, setActionLoading] = useState(false);
-  const [actionMsg, setActionMsg]       = useState(null);
-  const [newFee, setNewFee]             = useState("");
-  const [newRecipient, setNewRecipient] = useState("");
+  const [stats, setStats]                     = useState(null);
+  const [allJobs, setAllJobs]                 = useState([]);
+  const [disputedJobs, setDisputedJobs]       = useState([]);
+  const [loading, setLoading]                 = useState(true);
+  const [tab, setTab]                         = useState("overview");
+  const [actionLoading, setActionLoading]     = useState(false);
+  const [actionMsg, setActionMsg]             = useState(null);
+  const [newFee, setNewFee]                   = useState("");
+  const [newRecipient, setNewRecipient]       = useState("");
   const [disputeMessages, setDisputeMessages] = useState({});
-  const [selectedJob, setSelectedJob]   = useState(null);
-  const [filterStatus, setFilterStatus] = useState("all");
+  const [selectedJob, setSelectedJob]         = useState(null);
+  const [filterStatus, setFilterStatus]       = useState("all");
 
   const contract = wallet.signer
     ? new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, wallet.signer)
@@ -75,7 +75,7 @@ export default function Admin({ wallet }) {
       setAllJobs(jobs);
       setDisputedJobs(jobs.filter((j) => Number(j.status) === 3));
 
-      // Calculate USDC still locked in escrow (unapproved milestones)
+      // USDC locked in active/disputed unapproved milestones
       let usdcInEscrow = 0n;
       for (const job of jobs) {
         if (Number(job.status) === 1 || Number(job.status) === 3) {
@@ -87,14 +87,19 @@ export default function Admin({ wallet }) {
         }
       }
 
+      // Real contract balance from chain
+      const contractBalance     = await provider.getBalance(CONTRACTS.ESCROW);
+      const contractBalanceUsdc = contractBalance / 1_000_000_000_000n;
+
       setStats({
-        totalJobs:   totalNum,
-        open:        jobs.filter((j) => Number(j.status) === 0).length,
-        active:      jobs.filter((j) => Number(j.status) === 1).length,
-        completed:   jobs.filter((j) => Number(j.status) === 2).length,
-        disputed:    jobs.filter((j) => Number(j.status) === 3).length,
-        cancelled:   jobs.filter((j) => Number(j.status) === 4).length,
+        totalJobs:       totalNum,
+        open:            jobs.filter((j) => Number(j.status) === 0).length,
+        active:          jobs.filter((j) => Number(j.status) === 1).length,
+        completed:       jobs.filter((j) => Number(j.status) === 2).length,
+        disputed:        jobs.filter((j) => Number(j.status) === 3).length,
+        cancelled:       jobs.filter((j) => Number(j.status) === 4).length,
         usdcInEscrow,
+        contractBalance: contractBalanceUsdc,
       });
     } catch (e) {
       console.error("loadData error:", e.message);
@@ -149,6 +154,8 @@ export default function Admin({ wallet }) {
 
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto" }}>
+
+      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
         <div>
           <h1 style={{ marginBottom: 4 }}>Admin Dashboard</h1>
@@ -156,7 +163,9 @@ export default function Admin({ wallet }) {
             Connected as: <span className="addr">{shortAddr(wallet.address)}</span>
           </p>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={loadData}>Refresh</button>
+        <button className="btn btn-secondary btn-sm" onClick={loadData}>
+          Refresh
+        </button>
       </div>
 
       {actionMsg && (
@@ -165,51 +174,72 @@ export default function Admin({ wallet }) {
         </div>
       )}
 
-      {/* Stats */}
+      {/* Job Stats */}
       {stats && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 20 }}>
           {[
-            { label: "Total Jobs", value: stats.totalJobs,  color: "#00d4aa" },
-            { label: "Open",       value: stats.open,        color: "#f59e0b" },
-            { label: "Active",     value: stats.active,      color: "#3b82f6" },
-            { label: "Completed",  value: stats.completed,   color: "#10b981" },
-            { label: "Disputed",   value: stats.disputed,    color: "#ef4444" },
+            { label: "Total Jobs", value: stats.totalJobs, color: "#00d4aa" },
+            { label: "Open",       value: stats.open,       color: "#f59e0b" },
+            { label: "Active",     value: stats.active,     color: "#3b82f6" },
+            { label: "Completed",  value: stats.completed,  color: "#10b981" },
+            { label: "Disputed",   value: stats.disputed,   color: "#ef4444" },
           ].map((s) => (
             <div key={s.label} className="card" style={{ textAlign: "center", padding: 16 }}>
-              <div style={{ fontSize: "1.6rem", fontFamily: "monospace", fontWeight: 700, color: s.color }}>{s.value}</div>
+              <div style={{ fontSize: "1.6rem", fontFamily: "monospace", fontWeight: 700, color: s.color }}>
+                {s.value}
+              </div>
               <div style={{ fontSize: "0.75rem", color: "#7a8099", marginTop: 4 }}>{s.label}</div>
             </div>
           ))}
         </div>
       )}
 
+      {/* USDC Balance Cards */}
       {stats && (
-        <div className="card" style={{ marginBottom: 28, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: "0.75rem", color: "#7a8099", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
-              USDC Currently in Escrow
+        <div className="card" style={{ marginBottom: 28 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            <div>
+              <div style={{ fontSize: "0.75rem", color: "#7a8099", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+                Total USDC in Contract
+              </div>
+              <div style={{ fontSize: "1.8rem", fontFamily: "monospace", fontWeight: 700, color: "#2775CA" }}>
+                {formatUSDC(stats.contractBalance)} <span style={{ fontSize: "0.9rem" }}>USDC</span>
+              </div>
+              <div style={{ fontSize: "0.72rem", color: "#7a8099", marginTop: 4 }}>
+                Actual on-chain balance — matches Arc explorer
+              </div>
             </div>
-            <div style={{ fontSize: "2rem", fontFamily: "monospace", fontWeight: 700, color: "#2775CA" }}>
-              {formatUSDC(stats.usdcInEscrow)} <span style={{ fontSize: "0.9rem" }}>USDC</span>
+            <div>
+              <div style={{ fontSize: "0.75rem", color: "#7a8099", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+                USDC in Active / Disputed Jobs
+              </div>
+              <div style={{ fontSize: "1.8rem", fontFamily: "monospace", fontWeight: 700, color: "#00d4aa" }}>
+                {formatUSDC(stats.usdcInEscrow)} <span style={{ fontSize: "0.9rem" }}>USDC</span>
+              </div>
+              <div style={{ fontSize: "0.72rem", color: "#7a8099", marginTop: 4 }}>
+                Unapproved milestones only
+              </div>
             </div>
           </div>
-          <a
-            href={ARC_TESTNET.explorer + "/address/" + CONTRACTS.ESCROW}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-secondary btn-sm"
-          >
-            View Contract
-          </a>
+          <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+            <a
+              href={ARC_TESTNET.explorer + "/address/" + CONTRACTS.ESCROW}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-secondary btn-sm"
+            >
+              View Contract on Explorer
+            </a>
+          </div>
         </div>
       )}
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 24, padding: 4, background: "#12141a", borderRadius: 8, width: "fit-content", border: "1px solid #1f2330" }}>
         {[
-          { key: "overview", label: "All Jobs" },
-          { key: "disputes", label: "Disputes (" + (stats?.disputed || 0) + ")" },
-          { key: "settings", label: "Settings" },
+          { key: "overview", label: "All Jobs"                                    },
+          { key: "disputes", label: "Disputes (" + (stats?.disputed || 0) + ")"  },
+          { key: "settings", label: "Settings"                                    },
         ].map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{
             padding: "7px 18px", borderRadius: 6, border: "none",
@@ -223,12 +253,12 @@ export default function Admin({ wallet }) {
         ))}
       </div>
 
-      {/* All Jobs Tab */}
+      {/* ── ALL JOBS TAB ── */}
       {tab === "overview" && (
         <div>
           <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
             {[
-              { value: "all", label: "All" },
+              { value: "all", label: "All"       },
               { value: "0",   label: "Open"      },
               { value: "1",   label: "Active"    },
               { value: "2",   label: "Completed" },
@@ -241,8 +271,8 @@ export default function Admin({ wallet }) {
                 className="btn btn-sm"
                 style={{
                   background: filterStatus === f.value ? "rgba(0,212,170,0.15)" : "#1a1d26",
-                  color: filterStatus === f.value ? "#00d4aa" : "#7a8099",
-                  border: "1px solid " + (filterStatus === f.value ? "rgba(0,212,170,0.3)" : "#2a3050"),
+                  color:      filterStatus === f.value ? "#00d4aa" : "#7a8099",
+                  border:     "1px solid " + (filterStatus === f.value ? "rgba(0,212,170,0.3)" : "#2a3050"),
                 }}
               >
                 {f.label}
@@ -251,7 +281,9 @@ export default function Admin({ wallet }) {
           </div>
 
           {filteredJobs.length === 0 ? (
-            <div className="card" style={{ textAlign: "center", padding: 48, color: "#7a8099" }}>No jobs found.</div>
+            <div className="card" style={{ textAlign: "center", padding: 48, color: "#7a8099" }}>
+              No jobs found.
+            </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <div style={{
@@ -283,7 +315,7 @@ export default function Admin({ wallet }) {
         </div>
       )}
 
-      {/* Disputes Tab */}
+      {/* ── DISPUTES TAB ── */}
       {tab === "disputes" && (
         <div>
           {disputedJobs.length === 0 ? (
@@ -295,6 +327,8 @@ export default function Admin({ wallet }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
               {disputedJobs.map((job) => (
                 <div key={job.jobId} className="card" style={{ border: "1px solid rgba(239,68,68,0.3)" }}>
+
+                  {/* Header */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
                     <div>
                       <div style={{ fontFamily: "monospace", fontSize: "0.75rem", color: "#7a8099", marginBottom: 4 }}>JOB #{job.jobId}</div>
@@ -303,6 +337,7 @@ export default function Admin({ wallet }) {
                     <span className="badge badge-disputed">Disputed</span>
                   </div>
 
+                  {/* Parties */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 20px", marginBottom: 16 }}>
                     <div>
                       <div style={{ fontSize: "0.68rem", color: "#4a5068", textTransform: "uppercase", marginBottom: 2 }}>Client</div>
@@ -341,7 +376,7 @@ export default function Admin({ wallet }) {
                     </div>
                   )}
 
-                  {/* View chat button */}
+                  {/* Chat toggle */}
                   <button
                     className="btn btn-secondary btn-sm"
                     style={{ marginBottom: 16 }}
@@ -353,7 +388,7 @@ export default function Admin({ wallet }) {
                     {selectedJob === job.jobId ? "Hide Chat" : "View Dispute Chat"}
                   </button>
 
-                  {/* Chat */}
+                  {/* Chat messages */}
                   {selectedJob === job.jobId && disputeMessages[job.jobId] && (
                     <div style={{
                       background: "#0a0b0f", borderRadius: 8, padding: 14,
@@ -369,7 +404,7 @@ export default function Admin({ wallet }) {
                             <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isClientMsg ? "flex-start" : "flex-end" }}>
                               <div style={{
                                 background: isClientMsg ? "rgba(39,117,202,0.15)" : "rgba(0,212,170,0.1)",
-                                border: "1px solid " + (isClientMsg ? "rgba(39,117,202,0.3)" : "rgba(0,212,170,0.2)"),
+                                border:     "1px solid " + (isClientMsg ? "rgba(39,117,202,0.3)" : "rgba(0,212,170,0.2)"),
                                 borderRadius: 8, padding: "8px 12px", maxWidth: "80%",
                               }}>
                                 <div style={{ fontSize: "0.68rem", color: isClientMsg ? "#2775CA" : "#00d4aa", marginBottom: 3 }}>
@@ -389,9 +424,11 @@ export default function Admin({ wallet }) {
 
                   {/* Resolution */}
                   <div style={{ padding: 16, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.15)", borderRadius: 8 }}>
-                    <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "#ef4444", marginBottom: 8 }}>Admin Resolution</div>
+                    <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "#ef4444", marginBottom: 8 }}>
+                      Admin Resolution
+                    </div>
                     <p style={{ fontSize: "0.78rem", color: "#7a8099", marginBottom: 14, lineHeight: 1.6 }}>
-                      Admin can only intervene 7 days after the dispute was raised. Review the chat before resolving.
+                      Admin can only intervene 7 days after the dispute was raised. Review the chat history above before resolving.
                     </p>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button
@@ -418,7 +455,9 @@ export default function Admin({ wallet }) {
                       >
                         Split 50/50
                       </button>
-                      <Link to={"/job/" + job.jobId} className="btn btn-secondary btn-sm">View Full Job</Link>
+                      <Link to={"/job/" + job.jobId} className="btn btn-secondary btn-sm">
+                        View Full Job
+                      </Link>
                     </div>
                   </div>
                 </div>
@@ -428,9 +467,10 @@ export default function Admin({ wallet }) {
         </div>
       )}
 
-      {/* Settings Tab */}
+      {/* ── SETTINGS TAB ── */}
       {tab === "settings" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
           <div className="card">
             <h3 style={{ fontSize: "0.875rem", marginBottom: 4 }}>Platform Fee</h3>
             <p style={{ fontSize: "0.8rem", color: "#7a8099", marginBottom: 16 }}>
@@ -441,7 +481,8 @@ export default function Admin({ wallet }) {
                 className="input"
                 type="number"
                 placeholder="e.g. 100 for 1%"
-                min="0" max="500"
+                min="0"
+                max="500"
                 value={newFee}
                 onChange={(e) => setNewFee(e.target.value)}
               />
@@ -459,7 +500,7 @@ export default function Admin({ wallet }) {
           <div className="card">
             <h3 style={{ fontSize: "0.875rem", marginBottom: 4 }}>Fee Recipient</h3>
             <p style={{ fontSize: "0.8rem", color: "#7a8099", marginBottom: 16 }}>
-              The wallet address that receives platform fees.
+              The wallet address that receives all platform fees from milestone approvals.
             </p>
             <div style={{ display: "flex", gap: 8 }}>
               <input
@@ -497,6 +538,7 @@ export default function Admin({ wallet }) {
               ))}
             </div>
           </div>
+
         </div>
       )}
     </div>
