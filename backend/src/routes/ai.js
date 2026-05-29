@@ -5,22 +5,46 @@ dotenv.config({ path: "../.env" });
 
 const router = express.Router();
 
-async function callClaude(messages, stream = false) {
+async function callClaude(messages) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY not set in environment");
+  }
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1000,
-      stream,
       messages,
     }),
   });
-  return response;
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`Anthropic API error ${response.status}: ${errBody}`);
+  }
+
+  const data = await response.json();
+
+  if (!data.content || !data.content[0] || !data.content[0].text) {
+    throw new Error("Unexpected response from Claude: " + JSON.stringify(data));
+  }
+
+  const text  = data.content[0].text;
+  const clean = text.replace(/```json|```/g, "").trim();
+
+  try {
+    return JSON.parse(clean);
+  } catch {
+    throw new Error("Claude returned invalid JSON: " + clean);
+  }
 }
 
 // POST /api/ai/generate-job
@@ -29,7 +53,7 @@ router.post("/generate-job", async (req, res) => {
     const { roughIdea } = req.body;
     if (!roughIdea) return res.status(400).json({ error: "roughIdea required" });
 
-    const response = await callClaude([
+    const result = await callClaude([
       {
         role: "user",
         content: `You are a professional freelance job posting assistant.
@@ -55,11 +79,9 @@ Rules:
       },
     ]);
 
-    const data  = await response.json();
-    const text  = data.content[0].text;
-    const clean = text.replace(/```json|```/g, "").trim();
-    res.json(JSON.parse(clean));
+    res.json(result);
   } catch (err) {
+    console.error("generate-job error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -68,16 +90,17 @@ Rules:
 router.post("/dispute-verdict", async (req, res) => {
   try {
     const { job, messages } = req.body;
+    if (!job) return res.status(400).json({ error: "job required" });
 
     const milestonesText = job.milestones
       .map((ms, i) => `Milestone ${i + 1}: ${ms.description} — ${ms.amount} USDC — Status: ${["Pending","Submitted","Approved"][Number(ms.status)] || "Unknown"}`)
       .join("\n");
 
-    const chatText = messages
+    const chatText = (messages || [])
       .map((m) => `${m.isClient ? "Client" : "Freelancer"}: ${m.message}`)
       .join("\n");
 
-    const response = await callClaude([
+    const result = await callClaude([
       {
         role: "user",
         content: `You are a neutral AI arbitrator for a freelance dispute.
@@ -110,11 +133,9 @@ Rules:
       },
     ]);
 
-    const data  = await response.json();
-    const text  = data.content[0].text;
-    const clean = text.replace(/```json|```/g, "").trim();
-    res.json(JSON.parse(clean));
+    res.json(result);
   } catch (err) {
+    console.error("dispute-verdict error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -123,14 +144,15 @@ Rules:
 router.post("/split-milestones", async (req, res) => {
   try {
     const { title, description, totalBudget } = req.body;
+    if (!title || !totalBudget) return res.status(400).json({ error: "title and totalBudget required" });
 
-    const response = await callClaude([
+    const result = await callClaude([
       {
         role: "user",
         content: `You are a freelance project consultant.
 
 Job title: ${title}
-Description: ${description}
+Description: ${description || ""}
 Total budget: ${totalBudget} USDC
 
 Split this budget into 2-4 fair milestones in this EXACT JSON format and nothing else:
@@ -149,11 +171,9 @@ Rules:
       },
     ]);
 
-    const data  = await response.json();
-    const text  = data.content[0].text;
-    const clean = text.replace(/```json|```/g, "").trim();
-    res.json(JSON.parse(clean));
+    res.json(result);
   } catch (err) {
+    console.error("split-milestones error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
