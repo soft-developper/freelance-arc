@@ -5,7 +5,7 @@ import { initDB } from "./db.js";
 import invoiceRoutes from "./routes/invoices.js";
 import jobRoutes from "./routes/jobs.js";
 import { startEventListener } from "./services/eventListener.js";
-
+import aiRoutes from "./routes/ai.js";
 dotenv.config({ path: "../.env" });
 
 const app = express();
@@ -16,6 +16,7 @@ app.use(express.json());
 
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/jobs", jobRoutes);
+app.use("/api/ai", aiRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({
