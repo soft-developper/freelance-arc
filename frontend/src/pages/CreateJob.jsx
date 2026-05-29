@@ -48,15 +48,15 @@ export default function CreateJob({ wallet }) {
       const parsed = JSON.parse(clean);
 
       setForm({
-        title:       parsed.title || "",
-        description: parsed.description || "",
-        contact:     form.contact,
-        contactType: form.contactType,
-        milestones:  parsed.milestones?.map((m) => ({
-          description: m.description || "",
-          amount:      String(m.amount || ""),
-        })) || [{ description: "", amount: "" }],
-      });
+  title:       parsed.title || "",
+  description: parsed.description || "",
+  contact:     form.contact,
+  contactType: form.contactType,
+  milestones:  parsed.milestones?.map((m) => ({
+    description: m.description || "",
+    amount:      String(parseFloat(m.amount) || ""),
+  })) || [{ description: "", amount: "" }],
+});
       setShowAgent(false);
       setAgentText("");
     } catch (e) {
@@ -74,12 +74,12 @@ export default function CreateJob({ wallet }) {
     try {
       const result = await generateMilestoneSplit(form.title, form.description, totalBudget);
       setForm((f) => ({
-        ...f,
-        milestones: result.milestones.map((m) => ({
-          description: m.description || "",
-          amount:      String(m.amount || ""),
-        })),
-      }));
+  ...f,
+  milestones: result.milestones.map((m) => ({
+    description: m.description || "",
+    amount:      String(parseFloat(m.amount) || ""),
+  })),
+}));
       setTotalBudget("");
     } catch (e) {
       setAgentError("Milestone split failed: " + e.message);
