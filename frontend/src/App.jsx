@@ -7,7 +7,7 @@ import JobDetail from "./pages/JobDetail";
 import Invoices from "./pages/Invoices";
 import Landing from "./pages/Landing";
 import Admin from "./pages/Admin";
-
+import Agent from "./pages/Agent";
 // Deployer address — only this wallet can access admin
 const ADMIN_ADDRESS = "0xfAB99Fe25EDB59317A06db5B831b6B8fE0a7E879";
 
@@ -41,6 +41,10 @@ export default function App() {
             <Route
               path="/admin"
               element={isAdmin ? <Admin wallet={wallet} /> : <Navigate to="/" replace />}
+            />
+            <Route
+             path="/agent"
+             element={wallet.isConnected ? <Agent wallet={wallet} /> : <Navigate to="/" replace />}
             />
           </Routes>
         </main>
