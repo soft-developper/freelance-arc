@@ -1,17 +1,22 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useEscrow } from "../hooks/useEscrow";
 import { formatUSDC, JOB_STATUS, shortAddr, CONTRACTS } from "../utils/arc";
 import { ethers } from "ethers";
 import { ESCROW_ABI } from "../abi";
 
-function JobCard({ jobId, wallet, showRole }) {
+function JobCard({ jobId, wallet }) {
   const { getJob } = useEscrow(wallet.signer);
   const [job, setJob] = useState(null);
 
   useEffect(() => {
+    if (!jobId || !wallet.signer) return;
     getJob(jobId).then(setJob).catch(() => {});
-  }, [jobId]);
+    const interval = setInterval(() => {
+      getJob(jobId).then(setJob).catch(() => {});
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [jobId, wallet.signer]);
 
   if (!job) return (
     <div className="card" style={{ padding: 16, opacity: 0.5 }}>
@@ -26,43 +31,27 @@ function JobCard({ jobId, wallet, showRole }) {
     <Link to={"/job/" + jobId} style={{ textDecoration: "none" }}>
       <div className="card" style={{ cursor: "pointer" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-          <span style={{ fontFamily: "monospace", fontSize: "0.72rem", color: "#7a8099" }}>JOB #{String(jobId)}</span>
+          <span style={{ fontFamily: "monospace", fontSize: "0.72rem", color: "var(--text-muted)" }}>JOB #{String(jobId)}</span>
           <span className={"badge badge-" + statusLabel.toLowerCase()}>{statusLabel}</span>
         </div>
         <h3 style={{ fontSize: "1rem", marginBottom: 10 }}>{job.title}</h3>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{formatUSDC(job.totalAmount)} USDC</span>
-          {showRole && (
-            <span style={{
-              fontSize: "0.72rem",
-              color: isClient ? "#2775CA" : "#00d4aa",
-              background: isClient ? "rgba(39,117,202,0.1)" : "rgba(0,212,170,0.1)",
-              padding: "2px 8px", borderRadius: 4,
-            }}>
-              {isClient ? "CLIENT" : "FREELANCER"}
-            </span>
-          )}
+          <span style={{
+            fontSize: "0.72rem",
+            color: isClient ? "var(--usdc)" : "var(--primary)",
+            background: isClient ? "rgba(39,117,202,0.1)" : "var(--arc-dim)",
+            padding: "2px 8px", borderRadius: 4,
+          }}>
+            {isClient ? "CLIENT" : "FREELANCER"}
+          </span>
         </div>
-        <div style={{ marginTop: 8, fontSize: "0.75rem", color: "#7a8099" }}>
+        <div style={{ marginTop: 8, fontSize: "0.75rem", color: "var(--text-muted)" }}>
           Posted by: <span className="addr">{shortAddr(job.client)}</span>
         </div>
-        <div style={{ marginTop: 4, fontSize: "0.72rem", color: "#4a5068" }}>
+        <div style={{ marginTop: 4, fontSize: "0.72rem", color: "var(--text-dim)" }}>
           {new Date(Number(job.createdAt) * 1000).toLocaleDateString()}
         </div>
-        {statusLabel === "Open" && !isClient && (
-          <div style={{
-            marginTop: 10,
-            padding: "6px 12px",
-            background: "rgba(0,212,170,0.1)",
-            border: "1px solid rgba(0,212,170,0.3)",
-            borderRadius: 6,
-            fontSize: "0.78rem",
-            color: "#00d4aa",
-            textAlign: "center",
-          }}>
-            Click to Accept this Job
-          </div>
-        )}
       </div>
     </Link>
   );
@@ -70,6 +59,7 @@ function JobCard({ jobId, wallet, showRole }) {
 
 export default function Dashboard({ wallet }) {
   const { getClientJobs, getFreelancerJobs, getUSDCBalance } = useEscrow(wallet.signer);
+
   const [clientIds, setClientIds]         = useState([]);
   const [freelancerIds, setFreelancerIds] = useState([]);
   const [openJobIds, setOpenJobIds]       = useState([]);
@@ -77,64 +67,80 @@ export default function Dashboard({ wallet }) {
   const [loading, setLoading]             = useState(true);
   const [browseLoading, setBrowseLoading] = useState(true);
   const [tab, setTab]                     = useState("browse");
+  const [lastRefresh, setLastRefresh]     = useState(null);
 
-  // Load my jobs
-  useEffect(() => {
-    if (!wallet.address) return;
-    setLoading(true);
-    Promise.all([
-      getClientJobs(wallet.address),
-      getFreelancerJobs(wallet.address),
-      getUSDCBalance(wallet.address),
-    ]).then(([cj, fj, bal]) => {
+  // Load my jobs + balance
+  const loadMyData = useCallback(async () => {
+    if (!wallet.address || !wallet.signer) return;
+    try {
+      const [cj, fj, bal] = await Promise.all([
+        getClientJobs(wallet.address),
+        getFreelancerJobs(wallet.address),
+        getUSDCBalance(wallet.address),
+      ]);
       setClientIds([...cj].reverse());
       setFreelancerIds([...fj].reverse());
       setBalance(bal);
-    }).catch(console.error)
-    .finally(() => setLoading(false));
-  }, [wallet.address]);
+      setLastRefresh(new Date());
+    } catch (e) {
+      console.error("loadMyData error:", e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet.address, wallet.signer]);
 
   // Load all open jobs
-  useEffect(() => {
+  const loadOpenJobs = useCallback(async () => {
     if (!wallet.signer) return;
-    setBrowseLoading(true);
+    try {
+      const provider = wallet.signer.provider;
+      const contract = new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, provider);
+      const total    = await contract.getTotalJobs();
+      const totalNum = Number(total);
 
-    async function loadOpenJobs() {
-      try {
-        const provider = wallet.signer.provider;
-        const contract = new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, provider);
-        const total = await contract.getTotalJobs();
-        const totalNum = Number(total);
-
-        const ids = [];
-        // Check last 50 jobs max
-        const start = Math.max(1, totalNum - 49);
-        for (let i = totalNum; i >= start; i--) {
-          ids.push(BigInt(i));
-        }
-
-        // Filter only Open jobs (status 0)
-        const jobChecks = await Promise.all(
-          ids.map(async (id) => {
-            try {
-              const job = await contract.getJob(id);
-              return Number(job.status) === 0 ? id : null;
-            } catch {
-              return null;
-            }
-          })
-        );
-
-        setOpenJobIds(jobChecks.filter(Boolean));
-      } catch (e) {
-        console.error("loadOpenJobs error:", e.message);
-      } finally {
-        setBrowseLoading(false);
+      const ids = [];
+      const start = Math.max(1, totalNum - 49);
+      for (let i = totalNum; i >= start; i--) {
+        ids.push(BigInt(i));
       }
-    }
 
-    loadOpenJobs();
+      const jobChecks = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const job = await contract.getJob(id);
+            return Number(job.status) === 0 ? id : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      setOpenJobIds(jobChecks.filter(Boolean));
+    } catch (e) {
+      console.error("loadOpenJobs error:", e.message);
+    } finally {
+      setBrowseLoading(false);
+    }
   }, [wallet.signer]);
+
+  // Initial load
+  useEffect(() => {
+    if (!wallet.address) return;
+    setLoading(true);
+    setBrowseLoading(true);
+    loadMyData();
+    loadOpenJobs();
+  }, [wallet.address]);
+
+  // Auto refresh every 3 seconds
+  useEffect(() => {
+    if (!wallet.address || !wallet.signer) return;
+    const interval = setInterval(() => {
+      loadMyData();
+      loadOpenJobs();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [wallet.address, wallet.signer, loadMyData, loadOpenJobs]);
 
   const myIds = tab === "client" ? clientIds : freelancerIds;
 
@@ -144,20 +150,36 @@ export default function Dashboard({ wallet }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
         <div>
           <h1 style={{ marginBottom: 4 }}>Dashboard</h1>
-          <p style={{ color: "#7a8099", fontSize: "0.875rem" }}>Browse open jobs or manage your work</p>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
+            Browse open jobs or manage your work
+            {lastRefresh && (
+              <span style={{ marginLeft: 10, fontSize: "0.72rem", color: "var(--text-dim)" }}>
+                Last updated: {lastRefresh.toLocaleTimeString()}
+              </span>
+            )}
+          </p>
         </div>
-        <Link to="/create" className="btn btn-primary">+ Post Job</Link>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => { loadMyData(); loadOpenJobs(); }}
+          >
+            Refresh
+          </button>
+          <Link to="/create" className="btn btn-primary">+ Post Job</Link>
+        </div>
       </div>
 
       {/* Balance */}
       {balance !== null && (
         <div className="card" style={{ marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <div style={{ fontSize: "0.75rem", color: "#7a8099", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
               USDC Balance
             </div>
             <div style={{ fontSize: "1.8rem", fontFamily: "monospace", fontWeight: 700 }}>
-              {formatUSDC(balance)} <span style={{ fontSize: "0.9rem", color: "#2775CA" }}>USDC</span>
+              {formatUSDC(balance)}{" "}
+              <span style={{ fontSize: "0.9rem", color: "var(--usdc)" }}>USDC</span>
             </div>
           </div>
           <a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
@@ -169,13 +191,15 @@ export default function Dashboard({ wallet }) {
       {/* Stats */}
       <div className="grid-3" style={{ marginBottom: 24 }}>
         {[
-          { label: "Open Jobs Available", value: openJobIds.length   },
-          { label: "My Client Jobs",      value: clientIds.length    },
+          { label: "Open Jobs Available", value: openJobIds.length    },
+          { label: "My Client Jobs",      value: clientIds.length     },
           { label: "My Freelance Jobs",   value: freelancerIds.length },
         ].map((s) => (
           <div key={s.label} className="card" style={{ textAlign: "center", padding: 16 }}>
-            <div style={{ fontSize: "1.8rem", fontFamily: "monospace", fontWeight: 700, color: "#00d4aa" }}>{s.value}</div>
-            <div style={{ fontSize: "0.78rem", color: "#7a8099", marginTop: 4 }}>{s.label}</div>
+            <div style={{ fontSize: "1.8rem", fontFamily: "monospace", fontWeight: 700, color: "var(--primary)" }}>
+              {s.value}
+            </div>
+            <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: 4 }}>{s.label}</div>
           </div>
         ))}
       </div>
@@ -183,20 +207,20 @@ export default function Dashboard({ wallet }) {
       {/* Tabs */}
       <div style={{
         display: "flex", gap: 4, marginBottom: 20, padding: 4,
-        background: "#12141a", borderRadius: 8, width: "fit-content",
-        border: "1px solid #1f2330",
+        background: "var(--bg-card)", borderRadius: 10, width: "fit-content",
+        border: "1px solid var(--border)",
       }}>
         {[
-          { key: "browse",     label: "Browse Open Jobs (" + openJobIds.length + ")" },
-          { key: "client",     label: "My Client Jobs (" + clientIds.length + ")"    },
+          { key: "browse",     label: "Browse Open Jobs (" + openJobIds.length + ")"     },
+          { key: "client",     label: "My Client Jobs (" + clientIds.length + ")"        },
           { key: "freelancer", label: "My Freelance Jobs (" + freelancerIds.length + ")" },
         ].map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{
-            padding: "7px 16px", borderRadius: 6, border: "none",
-            background: tab === t.key ? "#1a1d26" : "transparent",
-            color: tab === t.key ? "#e8eaf0" : "#7a8099",
+            padding: "7px 16px", borderRadius: 7, border: "none",
+            background: tab === t.key ? "var(--bg-elevated)" : "transparent",
+            color: tab === t.key ? "var(--text)" : "var(--text-muted)",
             cursor: "pointer", fontSize: "0.82rem",
-            fontWeight: tab === t.key ? 500 : 400,
+            fontWeight: tab === t.key ? 600 : 400,
           }}>
             {t.label}
           </button>
@@ -206,11 +230,11 @@ export default function Dashboard({ wallet }) {
       {/* Browse open jobs */}
       {tab === "browse" && (
         browseLoading ? (
-          <div style={{ display: "flex", gap: 12, alignItems: "center", color: "#7a8099" }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", color: "var(--text-muted)" }}>
             <span className="spinner" /> Loading open jobs...
           </div>
         ) : openJobIds.length === 0 ? (
-          <div className="card" style={{ textAlign: "center", padding: 48, color: "#7a8099" }}>
+          <div className="card" style={{ textAlign: "center", padding: 48, color: "var(--text-muted)" }}>
             <div style={{ fontSize: "2rem", marginBottom: 12 }}>📋</div>
             <p>No open jobs right now.</p>
             <Link to="/create" className="btn btn-primary" style={{ marginTop: 16, display: "inline-flex" }}>
@@ -226,14 +250,14 @@ export default function Dashboard({ wallet }) {
         )
       )}
 
-      {/* My client or freelancer jobs */}
+      {/* My jobs */}
       {(tab === "client" || tab === "freelancer") && (
         loading ? (
-          <div style={{ display: "flex", gap: 12, alignItems: "center", color: "#7a8099" }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", color: "var(--text-muted)" }}>
             <span className="spinner" /> Loading...
           </div>
         ) : myIds.length === 0 ? (
-          <div className="card" style={{ textAlign: "center", padding: 48, color: "#7a8099" }}>
+          <div className="card" style={{ textAlign: "center", padding: 48, color: "var(--text-muted)" }}>
             <div style={{ fontSize: "2rem", marginBottom: 12 }}>📋</div>
             <p>No jobs yet as {tab}.</p>
             {tab === "client" && (
@@ -242,11 +266,7 @@ export default function Dashboard({ wallet }) {
               </Link>
             )}
             {tab === "freelancer" && (
-              <button
-                className="btn btn-primary"
-                style={{ marginTop: 16 }}
-                onClick={() => setTab("browse")}
-              >
+              <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => setTab("browse")}>
                 Browse open jobs
               </button>
             )}
