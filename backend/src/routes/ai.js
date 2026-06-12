@@ -7,10 +7,7 @@ const router = express.Router();
 
 async function callClaude(messages) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY not set in environment");
-  }
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -32,7 +29,6 @@ async function callClaude(messages) {
   }
 
   const data = await response.json();
-
   if (!data.content || !data.content[0] || !data.content[0].text) {
     throw new Error("Unexpected response from Claude: " + JSON.stringify(data));
   }
@@ -50,8 +46,16 @@ async function callClaude(messages) {
 // POST /api/ai/generate-job
 router.post("/generate-job", async (req, res) => {
   try {
-    const { roughIdea } = req.body;
+    const { roughIdea, category, subcategory, skills } = req.body;
     if (!roughIdea) return res.status(400).json({ error: "roughIdea required" });
+
+    const categoryContext = category
+      ? `The job is in the category: ${category}${subcategory ? ` — specifically: ${subcategory}` : ""}.`
+      : "";
+
+    const skillsContext = skills && skills.length > 0
+      ? `The client has indicated these required skills: ${skills.join(", ")}.`
+      : "";
 
     const result = await callClaude([
       {
@@ -60,6 +64,9 @@ router.post("/generate-job", async (req, res) => {
 
 A client has this rough idea for a job:
 "${roughIdea}"
+
+${categoryContext}
+${skillsContext}
 
 Generate a professional job post in this EXACT JSON format and nothing else:
 {
@@ -73,8 +80,9 @@ Generate a professional job post in this EXACT JSON format and nothing else:
 
 Rules:
 - 2 to 4 milestones maximum
-- Total USDC should be reasonable for the work described
+- Total USDC should be reasonable for the work described and the category
 - Milestones should be logical phases of the project
+- If skills are provided, reference them in the description
 - Return only valid JSON, no explanation, no markdown`,
       },
     ]);
