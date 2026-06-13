@@ -16,6 +16,7 @@ export default function CreateJob({ wallet }) {
     category:     "",
     subcategory:  "",
     skills:       [],
+    deadlineDays: 0,
     milestones:   [{ description: "", amount: "" }],
   });
 
@@ -139,7 +140,7 @@ export default function CreateJob({ wallet }) {
         subcategory:  form.subcategory,
         skills:       form.skills,
       });
-      await createJob({ title: form.title, descHash, milestones: form.milestones });
+      await createJob({ title: form.title, descHash, milestones: form.milestones, deadlineDays: form.deadlineDays });
       navigate("/dashboard");
     } catch {}
   };
@@ -352,6 +353,32 @@ export default function CreateJob({ wallet }) {
               value={form.contact}
               onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))}
             />
+          </div>
+        </div>
+
+        {/* Deadline */}
+        <div className="form-group">
+          <label className="label">Job Deadline (optional)</label>
+          <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: 8 }}>
+            If the freelancer hasn't submitted any work within this time, the job resets to Open and can be re-accepted. Set to 0 for no deadline.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <input
+              className="input"
+              type="number"
+              min="0"
+              max="365"
+              placeholder="0"
+              value={form.deadlineDays}
+              onChange={(e) => setForm((f) => ({ ...f, deadlineDays: Math.max(0, parseInt(e.target.value) || 0) }))}
+              style={{ width: 100 }}
+            />
+            <span style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>days after freelancer accepts</span>
+            {form.deadlineDays > 0 && (
+              <span style={{ fontSize: "0.78rem", color: "var(--primary)", background: "var(--arc-dim)", padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(14,165,233,0.2)" }}>
+                {form.deadlineDays} day{form.deadlineDays !== 1 ? "s" : ""} deadline
+              </span>
+            )}
           </div>
         </div>
 

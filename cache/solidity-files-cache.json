@@ -2,8 +2,8 @@
   "_format": "hh-sol-cache-2",
   "files": {
     "/home/probeat/freelance-arc/contracts/FreelanceEscrow.sol": {
-      "lastModificationDate": 1779485299638,
-      "contentHash": "a2552fa0d45ba83c70d08a9b00da2311",
+      "lastModificationDate": 1781340015113,
+      "contentHash": "efe1d6272f881ee47954c8443920edf0",
       "sourceName": "contracts/FreelanceEscrow.sol",
       "solcConfig": {
         "version": "0.8.24",

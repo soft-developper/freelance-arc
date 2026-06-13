@@ -17,7 +17,7 @@ function parseJobMeta(descriptionHash) {
 export default function JobDetail({ wallet }) {
   const { jobId } = useParams();
   const navigate  = useNavigate();
-  const { getJob, loading, txHash, error } = useEscrow(wallet.signer);
+  const { getJob, expireJob, loading, txHash, error } = useEscrow(wallet.signer);
 
   const [job, setJob]                           = useState(null);
   const [fetchError, setFetchError]             = useState(null);
@@ -38,6 +38,14 @@ export default function JobDetail({ wallet }) {
   const statusLabel  = job ? (JOB_STATUS[Number(job.status)] || "Unknown") : "";
   const noFreelancer = job?.freelancer === "0x0000000000000000000000000000000000000000";
   const hasSplitProposal = job?.clientSplitPercent > 0n;
+
+  const hasDeadline           = job?.deadlineDuration > 0n;
+  const deadlineDate          = hasDeadline && job?.acceptedAt > 0n
+    ? new Date((Number(job.acceptedAt) + Number(job.deadlineDuration)) * 1000)
+    : null;
+  const deadlinePassed        = deadlineDate && Date.now() > deadlineDate.getTime();
+  const anyMilestoneSubmitted = job?.milestones?.some((ms) => Number(ms.status) !== 0);
+
   const pendingMilestones = job?.milestones?.filter((ms) => Number(ms.status) !== 2) || [];
   const meta     = job ? parseJobMeta(job.descriptionHash) : null;
   const category = meta ? getCategoryById(meta.category) : null;
@@ -186,6 +194,26 @@ export default function JobDetail({ wallet }) {
               <div style={{ fontSize: "0.72rem", color: "var(--text-dim)", textTransform: "uppercase", marginBottom: 2 }}>Created</div>
               <span style={{ fontSize: "0.85rem" }}>{new Date(Number(job.createdAt) * 1000).toLocaleString()}</span>
             </div>
+
+            {/* Deadline */}
+            {hasDeadline && (
+              <div>
+                <div style={{ fontSize: "0.72rem", color: "var(--text-dim)", textTransform: "uppercase", marginBottom: 2 }}>Deadline</div>
+                {job.acceptedAt > 0n ? (
+                  <span style={{
+                    fontSize: "0.85rem",
+                    color: deadlinePassed ? "var(--error)" : "var(--warning)",
+                    fontWeight: 600,
+                  }}>
+                    {deadlinePassed ? "⚠ Expired — " : "⏱ "}{deadlineDate?.toLocaleDateString()}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                    {Number(job.deadlineDuration) / 86400} days after acceptance
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Description */}
@@ -419,6 +447,19 @@ export default function JobDetail({ wallet }) {
               )}
               <button className="btn btn-primary" onClick={() => act((c) => c.acceptJob(BigInt(jobId)))} disabled={actionLoading}>
                 {actionLoading ? <><span className="spinner" /> Processing...</> : "Accept Job"}
+              </button>
+            </div>
+          )}
+
+          {/* Expire job — shown to anyone when deadline has passed and no work submitted */}
+          {hasDeadline && deadlinePassed && !anyMilestoneSubmitted && Number(job.status) === 1 && (
+            <div style={{ padding: 14, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, marginBottom: 12 }}>
+              <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 4, color: "var(--error)" }}>Deadline Passed</div>
+              <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: 10 }}>
+                The freelancer missed the deadline without submitting any work. Anyone can reset this job back to Open.
+              </p>
+              <button className="btn btn-danger btn-sm" onClick={() => act((c) => c.expireJob(BigInt(jobId)))} disabled={actionLoading}>
+                Expire Job & Reset to Open
               </button>
             </div>
           )}

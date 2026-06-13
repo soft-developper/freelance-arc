@@ -34,7 +34,7 @@ export function useEscrow(signer) {
     }
   }, []);
 
-  const createJob = useCallback(async ({ title, descHash, milestones }) => {
+  const createJob = useCallback(async ({ title, descHash, milestones, deadlineDays = 0 }) => {
     if (!signer) throw new Error("Wallet not connected");
     if (!CONTRACTS.ESCROW) throw new Error("Escrow contract address not set");
 
@@ -58,7 +58,7 @@ export function useEscrow(signer) {
         const approveTx = await usdcContract.approve(CONTRACTS.ESCROW, deposit);
         await approveTx.wait();
       }
-      const tx = await escrowContract.createJob(title, descHash || "", descs, amounts);
+      const tx = await escrowContract.createJob(title, descHash || "", descs, amounts, BigInt(deadlineDays));
       setTxHash(tx.hash);
       await tx.wait();
     } catch (err) {
@@ -81,6 +81,7 @@ export function useEscrow(signer) {
   const addDisputeMessage          = useCallback((jobId, msg) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).addDisputeMessage(jobId, msg)), [signer, exec]);
   const cancelJob                  = useCallback((jobId) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).cancelJob(jobId)), [signer, exec]);
   const claimMilestoneAfterTimeout = useCallback((jobId, i) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).claimMilestoneAfterTimeout(jobId, i)), [signer, exec]);
+  const expireJob                  = useCallback((jobId) => exec(() => new ethers.Contract(CONTRACTS.ESCROW, ESCROW_ABI, signer).expireJob(jobId)), [signer, exec]);
 
   const getJob = useCallback(async (jobId) => {
     if (!provider) return null;
@@ -131,7 +132,7 @@ export function useEscrow(signer) {
     createJob, acceptJob, submitMilestone, approveMilestone,
     approveAllMilestones, requestMilestoneRevision, raiseDispute,
     proposeSplit, acceptSplit, addDisputeMessage, cancelJob,
-    claimMilestoneAfterTimeout, getJob, getClientJobs,
+    claimMilestoneAfterTimeout, expireJob, getJob, getClientJobs,
     getFreelancerJobs, getUSDCBalance,
   };
 }

@@ -58,6 +58,24 @@ function JobCard({ jobId, wallet }) {
           </div>
         )}
 
+        {/* Deadline badge */}
+        {job.deadlineDuration > 0n && job.acceptedAt > 0n && Number(job.status) === 1 && (() => {
+          const deadlineTs = (Number(job.acceptedAt) + Number(job.deadlineDuration)) * 1000;
+          const passed     = Date.now() > deadlineTs;
+          const daysLeft   = Math.ceil((deadlineTs - Date.now()) / 86400000);
+          return (
+            <span style={{
+              fontSize: "0.72rem",
+              padding: "2px 8px", borderRadius: 4, marginBottom: 6, display: "inline-block",
+              background: passed ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.1)",
+              color: passed ? "var(--error)" : "var(--warning)",
+              border: "1px solid " + (passed ? "rgba(239,68,68,0.3)" : "rgba(245,158,11,0.3)"),
+            }}>
+              {passed ? "⚠ Deadline passed" : `⏱ ${daysLeft}d left`}
+            </span>
+          );
+        })()}
+
         {/* Skills */}
         {meta?.skills?.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>

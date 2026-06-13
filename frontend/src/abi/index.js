@@ -1,7 +1,8 @@
 export const ESCROW_ABI = [
   // Write
-  "function createJob(string title, string descriptionHash, string[] milestoneDescs, uint256[] milestoneAmounts) returns (uint256)",
+  "function createJob(string title, string descriptionHash, string[] milestoneDescs, uint256[] milestoneAmounts, uint256 deadlineDays) returns (uint256)",
   "function acceptJob(uint256 jobId)",
+  "function expireJob(uint256 jobId)",
   "function submitMilestone(uint256 jobId, uint256 milestoneIndex, string deliverableHash)",
   "function approveMilestone(uint256 jobId, uint256 milestoneIndex)",
   "function approveAllMilestones(uint256 jobId)",
@@ -12,17 +13,16 @@ export const ESCROW_ABI = [
   "function addDisputeMessage(uint256 jobId, string message)",
   "function cancelJob(uint256 jobId)",
   "function claimMilestoneAfterTimeout(uint256 jobId, uint256 milestoneIndex)",
-
   // Read
-  "function getJob(uint256 jobId) view returns (tuple(uint256 id, address client, address freelancer, uint256 totalAmount, uint256 platformFee, string title, string descriptionHash, uint8 status, uint256 createdAt, uint256 disputedAt, uint256 clientSplitPercent, bool freelancerAgreedToSplit, tuple(string description, uint256 amount, uint8 status, string deliverableHash, uint256 submittedAt)[] milestones))",
+  "function getJob(uint256 jobId) view returns (tuple(uint256 id, address client, address freelancer, uint256 totalAmount, uint256 platformFee, string title, string descriptionHash, uint8 status, uint256 createdAt, uint256 disputedAt, uint256 deadlineDuration, uint256 acceptedAt, uint256 clientSplitPercent, bool freelancerAgreedToSplit, tuple(string description, uint256 amount, uint8 status, string deliverableHash, uint256 submittedAt)[] milestones))",
   "function getMilestones(uint256 jobId) view returns (tuple(string description, uint256 amount, uint8 status, string deliverableHash, uint256 submittedAt)[])",
   "function getClientJobs(address client) view returns (uint256[])",
   "function getFreelancerJobs(address freelancer) view returns (uint256[])",
   "function getTotalJobs() view returns (uint256)",
-
   // Events
   "event JobCreated(uint256 indexed jobId, address indexed client, uint256 totalAmount, string title)",
   "event JobAccepted(uint256 indexed jobId, address indexed freelancer)",
+  "event JobExpired(uint256 indexed jobId, address indexed expiredFreelancer)",
   "event MilestoneSubmitted(uint256 indexed jobId, uint256 indexed milestoneIndex, string deliverableHash)",
   "event MilestoneApproved(uint256 indexed jobId, uint256 indexed milestoneIndex, uint256 amount)",
   "event JobCompleted(uint256 indexed jobId, address indexed freelancer, uint256 totalReleased)",

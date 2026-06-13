@@ -49,6 +49,8 @@ contract FreelanceEscrow is ReentrancyGuard, Ownable {
         JobStatus status;
         uint256 createdAt;
         uint256 disputedAt;
+        uint256 deadlineDuration;  // in seconds, 0 = no deadline
+        uint256 acceptedAt;        // when freelancer accepted
         uint256 clientSplitPercent;
         bool freelancerAgreedToSplit;
         Milestone[] milestones;
@@ -61,6 +63,7 @@ contract FreelanceEscrow is ReentrancyGuard, Ownable {
 
     event JobCreated(uint256 indexed jobId, address indexed client, uint256 totalAmount, string title);
     event JobAccepted(uint256 indexed jobId, address indexed freelancer);
+    event JobExpired(uint256 indexed jobId, address indexed expiredFreelancer);
     event MilestoneSubmitted(uint256 indexed jobId, uint256 indexed milestoneIndex, string deliverableHash);
     event MilestoneApproved(uint256 indexed jobId, uint256 indexed milestoneIndex, uint256 amount);
     event AllMilestonesApproved(uint256 indexed jobId, address indexed freelancer, uint256 totalReleased);
@@ -94,7 +97,8 @@ contract FreelanceEscrow is ReentrancyGuard, Ownable {
         string calldata title,
         string calldata descHash,
         string[] calldata milestoneDescs,
-        uint256[] calldata milestoneAmounts
+        uint256[] calldata milestoneAmounts,
+        uint256 deadlineDays  // 0 = no deadline
     ) external nonReentrant returns (uint256 jobId) {
         require(milestoneDescs.length > 0, "Need at least 1 milestone");
         require(milestoneDescs.length == milestoneAmounts.length, "Milestones mismatch");
@@ -118,6 +122,7 @@ contract FreelanceEscrow is ReentrancyGuard, Ownable {
         job.descriptionHash = descHash;
         job.status      = JobStatus.Open;
         job.createdAt   = block.timestamp;
+        job.deadlineDuration = deadlineDays * 1 days;
 
         for (uint256 i = 0; i < milestoneDescs.length; i++) {
             job.milestones.push(Milestone({
@@ -146,8 +151,7 @@ contract FreelanceEscrow is ReentrancyGuard, Ownable {
 
         ms.status = MilestoneStatus.Approved;
 
-        // Calculate fee for this milestone
-        uint256 milestoneFee    = (ms.amount * platformFeeBps) / 10_000;
+        uint256 milestoneFee     = (ms.amount * platformFeeBps) / 10_000;
         uint256 freelancerAmount = ms.amount - milestoneFee;
 
         usdc.safeTransfer(feeRecipient, milestoneFee);
@@ -155,7 +159,6 @@ contract FreelanceEscrow is ReentrancyGuard, Ownable {
 
         emit MilestoneApproved(jobId, milestoneIndex, freelancerAmount);
 
-        // Check if all milestones are approved
         bool allDone = true;
         for (uint256 i = 0; i < job.milestones.length; i++) {
             if (job.milestones[i].status != MilestoneStatus.Approved) {
@@ -168,36 +171,35 @@ contract FreelanceEscrow is ReentrancyGuard, Ownable {
             emit JobCompleted(jobId, job.freelancer, job.totalAmount);
         }
     }
-     
 
-     // Client approves ALL remaining milestones at once and releases full payment
+    // Client approves ALL remaining milestones at once and releases full payment
     function approveAllMilestones(uint256 jobId) external nonReentrant {
-    Job storage job = _requireJob(jobId);
-    if (msg.sender != job.client) revert NotClient();
-    require(job.status == JobStatus.Active, "Job not active");
+        Job storage job = _requireJob(jobId);
+        if (msg.sender != job.client) revert NotClient();
+        require(job.status == JobStatus.Active, "Job not active");
 
-    uint256 totalFreelancer = 0;
-    uint256 totalFee        = 0;
+        uint256 totalFreelancer = 0;
+        uint256 totalFee        = 0;
 
-    for (uint256 i = 0; i < job.milestones.length; i++) {
-        Milestone storage ms = job.milestones[i];
-        if (ms.status != MilestoneStatus.Approved) {
-            ms.status = MilestoneStatus.Approved;
-            uint256 milestoneFee     = (ms.amount * platformFeeBps) / 10_000;
-            uint256 freelancerAmount = ms.amount - milestoneFee;
-            totalFreelancer += freelancerAmount;
-            totalFee        += milestoneFee;
-            emit MilestoneApproved(jobId, i, freelancerAmount);
+        for (uint256 i = 0; i < job.milestones.length; i++) {
+            Milestone storage ms = job.milestones[i];
+            if (ms.status != MilestoneStatus.Approved) {
+                ms.status = MilestoneStatus.Approved;
+                uint256 milestoneFee     = (ms.amount * platformFeeBps) / 10_000;
+                uint256 freelancerAmount = ms.amount - milestoneFee;
+                totalFreelancer += freelancerAmount;
+                totalFee        += milestoneFee;
+                emit MilestoneApproved(jobId, i, freelancerAmount);
+            }
         }
+
+        if (totalFee > 0)        usdc.safeTransfer(feeRecipient, totalFee);
+        if (totalFreelancer > 0) usdc.safeTransfer(job.freelancer, totalFreelancer);
+
+        job.status = JobStatus.Completed;
+        emit JobCompleted(jobId, job.freelancer, totalFreelancer);
     }
 
-    if (totalFee > 0)        usdc.safeTransfer(feeRecipient, totalFee);
-    if (totalFreelancer > 0) usdc.safeTransfer(job.freelancer, totalFreelancer);
-
-    job.status = JobStatus.Completed;
-    emit JobCompleted(jobId, job.freelancer, totalFreelancer);
-}
-    
     // Client requests revision on a specific milestone
     function requestMilestoneRevision(uint256 jobId, uint256 milestoneIndex, string calldata feedback) external {
         Job storage job = _requireJob(jobId);
@@ -241,14 +243,12 @@ contract FreelanceEscrow is ReentrancyGuard, Ownable {
         require(job.status == JobStatus.Open, "Job not open");
         job.status = JobStatus.Cancelled;
 
-        // Refund remaining unapproved milestones + fee
         uint256 refund = 0;
         for (uint256 i = 0; i < job.milestones.length; i++) {
             if (job.milestones[i].status != MilestoneStatus.Approved) {
                 refund += job.milestones[i].amount;
             }
         }
-        // Add platform fee back
         refund += job.platformFee;
         usdc.safeTransfer(job.client, refund);
         emit JobCancelled(jobId);
@@ -262,8 +262,33 @@ contract FreelanceEscrow is ReentrancyGuard, Ownable {
         require(msg.sender != job.client, "Client cannot be freelancer");
         job.freelancer = msg.sender;
         job.status     = JobStatus.Active;
+        job.acceptedAt = block.timestamp;
         freelancerJobs[msg.sender].push(jobId);
         emit JobAccepted(jobId, msg.sender);
+    }
+
+    // Anyone can call this to expire a job where freelancer missed deadline
+    function expireJob(uint256 jobId) external {
+        Job storage job = _requireJob(jobId);
+        require(job.status == JobStatus.Active, "Job not active");
+        require(job.deadlineDuration > 0, "No deadline set");
+        require(block.timestamp > job.acceptedAt + job.deadlineDuration, "Deadline not passed");
+
+        bool anySubmitted = false;
+        for (uint256 i = 0; i < job.milestones.length; i++) {
+            if (job.milestones[i].status != MilestoneStatus.Pending) {
+                anySubmitted = true;
+                break;
+            }
+        }
+        require(!anySubmitted, "Freelancer has submitted work");
+
+        address oldFreelancer = job.freelancer;
+        job.freelancer = address(0);
+        job.status     = JobStatus.Open;
+        job.acceptedAt = 0;
+
+        emit JobExpired(jobId, oldFreelancer);
     }
 
     // Freelancer submits work for a specific milestone
@@ -303,7 +328,6 @@ contract FreelanceEscrow is ReentrancyGuard, Ownable {
 
         job.status = JobStatus.Completed;
 
-        // Calculate remaining amount (subtract already approved milestones)
         uint256 remaining = 0;
         for (uint256 i = 0; i < job.milestones.length; i++) {
             if (job.milestones[i].status != MilestoneStatus.Approved) {
