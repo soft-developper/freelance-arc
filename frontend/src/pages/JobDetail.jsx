@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import JobChat from "../components/JobChat.jsx";
 import { useParams, useNavigate } from "react-router-dom";
 import { useEscrow } from "../hooks/useEscrow";
 import { formatUSDC, shortAddr, ARC_TESTNET, CONTRACTS } from "../utils/arc";
@@ -348,7 +349,11 @@ export default function JobDetail({ wallet }) {
             </div>
           </div>
         )}
-
+	
+        {Number(job.status) === 1 && (
+        <JobChat jobId={jobId} wallet={wallet} job={job} />
+        )}
+	
         {/* Dispute Chat */}
         {Number(job.status) === 3 && (
           <div className="card" style={{ border: "1px solid rgba(239,68,68,0.3)" }}>

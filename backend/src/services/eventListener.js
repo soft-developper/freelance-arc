@@ -12,8 +12,8 @@ const ESCROW_ABI = [
   "event MilestoneSubmitted(uint256 indexed jobId, uint256 indexed milestoneIndex, string deliverableHash)",
 ];
 
-const POLL_INTERVAL  = 20_000; // 20 seconds — safe for free RPC tier
-const BLOCK_CHUNK    = 500;    // fetch logs in chunks to avoid oversized requests
+const POLL_INTERVAL = 20_000; // 20 seconds
+const BLOCK_CHUNK   = 500;
 
 export async function startEventListener() {
   const escrowAddress = process.env.VITE_ESCROW_CONTRACT_ADDRESS;
@@ -28,41 +28,30 @@ export async function startEventListener() {
 
   console.log("👂  Listening to escrow events on Arc Testnet...");
 
-  // Track the last block we processed so we don't re-fetch old events
   let lastBlock = null;
 
   async function pollEvents() {
     try {
       const currentBlock = await provider.getBlockNumber();
-
-      // On first run start from 200 blocks back to catch recent events
-      if (lastBlock === null) {
-        lastBlock = Math.max(0, currentBlock - 200);
-      }
-
+      if (lastBlock === null) lastBlock = Math.max(0, currentBlock - 200);
       if (currentBlock <= lastBlock) return;
 
-      // Process in chunks to stay under log size limits
       for (let from = lastBlock + 1; from <= currentBlock; from += BLOCK_CHUNK) {
         const to = Math.min(from + BLOCK_CHUNK - 1, currentBlock);
-
         try {
           const events = await escrow.queryFilter("*", from, to);
-
           for (const event of events) {
             await handleEvent(event).catch((err) =>
               console.error(`❌ Handler error [${event.fragment?.name}]:`, err.message)
             );
           }
         } catch (chunkErr) {
-          // Rate limit or RPC error on this chunk — log and skip, don't crash
           console.warn(`⚠️  Chunk ${from}-${to} skipped:`, chunkErr.shortMessage || chunkErr.message);
         }
       }
 
       lastBlock = currentBlock;
     } catch (err) {
-      // getBlockNumber failed — log and retry next interval
       console.warn("⚠️  Poll error (will retry):", err.shortMessage || err.message);
     }
   }
@@ -76,19 +65,19 @@ export async function startEventListener() {
       console.log(`📋  JobCreated: #${jobId} — ${title}`);
 
       await db.execute({
-        sql: `INSERT INTO jobs (job_id, client, title, total_amount, status, tx_hash)
-              VALUES (?, ?, ?, ?, 0, ?)
-              ON CONFLICT(job_id) DO NOTHING`,
+        sql:  `INSERT INTO jobs (job_id, client, title, total_amount, status, tx_hash)
+               VALUES (?, ?, ?, ?, 0, ?)
+               ON CONFLICT(job_id) DO NOTHING`,
         args: [jobId.toString(), client.toLowerCase(), title, totalAmount.toString(), event.transactionHash],
       });
 
-      const lastResult   = await db.execute(`SELECT MAX(invoice_number) as last FROM invoices`);
+      const lastResult    = await db.execute(`SELECT MAX(invoice_number) as last FROM invoices`);
       const invoiceNumber = (lastResult.rows[0].last || 1000) + 1;
 
       await db.execute({
-        sql: `INSERT INTO invoices (invoice_number, job_id, client, amount_usdc, amount_display, title, tx_hash)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
-              ON CONFLICT(invoice_number) DO NOTHING`,
+        sql:  `INSERT INTO invoices (invoice_number, job_id, client, amount_usdc, amount_display, title, tx_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(invoice_number) DO NOTHING`,
         args: [
           invoiceNumber,
           jobId.toString(),
@@ -104,13 +93,12 @@ export async function startEventListener() {
     else if (name === "JobAccepted") {
       const [jobId, freelancer] = args;
       console.log(`🤝  JobAccepted: #${jobId}`);
-
       await db.execute({
-        sql: `UPDATE jobs SET freelancer = ?, status = 1 WHERE job_id = ?`,
+        sql:  `UPDATE jobs SET freelancer = ?, status = 1 WHERE job_id = ?`,
         args: [freelancer.toLowerCase(), jobId.toString()],
       });
       await db.execute({
-        sql: `UPDATE invoices SET freelancer = ? WHERE job_id = ?`,
+        sql:  `UPDATE invoices SET freelancer = ? WHERE job_id = ?`,
         args: [freelancer.toLowerCase(), jobId.toString()],
       });
     }
@@ -118,9 +106,8 @@ export async function startEventListener() {
     else if (name === "MilestoneSubmitted") {
       const [jobId, milestoneIndex, deliverableHash] = args;
       console.log(`📦  MilestoneSubmitted: #${jobId} milestone ${milestoneIndex}`);
-
       await db.execute({
-        sql: `UPDATE jobs SET deliverable_hash = ?, status = 2 WHERE job_id = ?`,
+        sql:  `UPDATE jobs SET deliverable_hash = ?, status = 2 WHERE job_id = ?`,
         args: [deliverableHash, jobId.toString()],
       });
     }
@@ -128,23 +115,23 @@ export async function startEventListener() {
     else if (name === "JobCompleted") {
       const [jobId] = args;
       console.log(`✅  JobCompleted: #${jobId}`);
-
       await db.execute({
-        sql: `UPDATE jobs SET status = 3 WHERE job_id = ?`,
+        sql:  `UPDATE jobs SET status = 3 WHERE job_id = ?`,
         args: [jobId.toString()],
       });
       await db.execute({
-        sql: `UPDATE invoices SET paid = 1, paid_at = datetime('now') WHERE job_id = ?`,
+        sql:  `UPDATE invoices SET paid = 1, paid_at = datetime('now') WHERE job_id = ?`,
         args: [jobId.toString()],
       });
+      // Delete chat messages after job ends
+      await deleteChatMessages(jobId.toString());
     }
 
     else if (name === "JobDisputed") {
       const [jobId] = args;
       console.log(`⚖️  JobDisputed: #${jobId}`);
-
       await db.execute({
-        sql: `UPDATE jobs SET status = 4 WHERE job_id = ?`,
+        sql:  `UPDATE jobs SET status = 4 WHERE job_id = ?`,
         args: [jobId.toString()],
       });
     }
@@ -152,21 +139,32 @@ export async function startEventListener() {
     else if (name === "JobExpired") {
       const [jobId, expiredFreelancer] = args;
       console.log(`⏰  JobExpired: #${jobId} — freelancer ${expiredFreelancer} removed`);
-
       await db.execute({
-        sql: `UPDATE jobs SET freelancer = NULL, status = 0 WHERE job_id = ?`,
+        sql:  `UPDATE jobs SET freelancer = NULL, status = 0 WHERE job_id = ?`,
         args: [jobId.toString()],
       });
+      // Delete chat messages — job reset to open
+      await deleteChatMessages(jobId.toString());
     }
   }
 
-  // Run immediately then on interval
+  async function deleteChatMessages(jobId) {
+    try {
+      await db.execute({
+        sql:  `DELETE FROM job_messages WHERE job_id = ?`,
+        args: [jobId],
+      });
+      console.log(`🗑️  Chat messages deleted for job #${jobId}`);
+    } catch (err) {
+      console.error(`Failed to delete chat messages for job #${jobId}:`, err.message);
+    }
+  }
+
   await pollEvents();
   setInterval(async () => {
     try {
       await pollEvents();
     } catch (err) {
-      // Belt-and-suspenders — pollEvents already catches internally
       console.warn("⚠️  Interval poll error:", err.message);
     }
   }, POLL_INTERVAL);

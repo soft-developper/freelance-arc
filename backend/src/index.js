@@ -5,6 +5,7 @@ import { initDB } from "./db.js";
 import invoiceRoutes from "./routes/invoices.js";
 import jobRoutes from "./routes/jobs.js";
 import { startEventListener } from "./services/eventListener.js";
+import chatRoutes from "./routes/chat.js";
 import aiRoutes from "./routes/ai.js";
 import agentRoutes from "./routes/agent.js";
 dotenv.config({ path: "../.env" });
@@ -18,6 +19,7 @@ app.use(express.json());
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/jobs", jobRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/chat", chatRoutes);
 app.use("/api/agent", agentRoutes);
 
 app.get("/api/health", (req, res) => {

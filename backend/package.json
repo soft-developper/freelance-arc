@@ -10,10 +10,12 @@
   "dependencies": {
     "@circle-fin/developer-controlled-wallets": "^10.6.0",
     "@libsql/client": "0.4.3",
+    "cloudinary": "^2.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "ethers": "^6.11.1",
     "express": "^4.19.2",
+    "multer": "^2.2.0",
     "pdfkit": "^0.15.0",
     "uuid": "^14.0.0"
   }
