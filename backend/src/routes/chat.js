@@ -4,8 +4,6 @@ import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
 import { Readable } from "stream";
 import { ethers } from "ethers";
-import dotenv from "dotenv";
-dotenv.config({ path: "../.env" });
 
 const router = express.Router();
 
@@ -16,25 +14,30 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Blockchain provider + minimal ABI to read job
-const RPC_URL = process.env.ARC_RPC_URL || "https://rpc.testnet.arc.network";
-const provider = new ethers.JsonRpcProvider(RPC_URL);
 const ESCROW_ABI = [
   "function getJob(uint256 jobId) view returns (tuple(uint256 id, address client, address freelancer, uint256 totalAmount, uint256 platformFee, string title, string descriptionHash, uint8 status, uint256 createdAt, uint256 disputedAt, uint256 deadlineDuration, uint256 acceptedAt, uint256 clientSplitPercent, bool freelancerAgreedToSplit, tuple(string description, uint256 amount, uint8 status, string deliverableHash, uint256 submittedAt)[] milestones))",
 ];
-const escrow = new ethers.Contract(process.env.VITE_ESCROW_CONTRACT_ADDRESS, ESCROW_ABI, provider);
 
-// Fetch job from chain
+// Lazy init — reads env at call time not module load time
+function getEscrowContract() {
+  const rpcUrl        = process.env.ARC_RPC_URL || "https://rpc.testnet.arc.network";
+  const escrowAddress = process.env.VITE_ESCROW_CONTRACT_ADDRESS;
+  const provider      = new ethers.JsonRpcProvider(rpcUrl);
+  return new ethers.Contract(escrowAddress, ESCROW_ABI, provider);
+}
+
 async function getJobFromChain(jobId) {
   try {
-    const job = await escrow.getJob(BigInt(jobId));
+    const escrow = getEscrowContract();
+    const job    = await escrow.getJob(BigInt(jobId));
     if (!job || job.id === 0n) return null;
     return {
       client:     job.client.toLowerCase(),
       freelancer: job.freelancer.toLowerCase(),
       status:     Number(job.status),
     };
-  } catch {
+  } catch (e) {
+    console.error("getJobFromChain error:", e.message);
     return null;
   }
 }
@@ -50,7 +53,6 @@ const upload = multer({
   },
 });
 
-// Helper: upload buffer to Cloudinary
 function uploadToCloudinary(buffer, mimetype, jobId) {
   return new Promise((resolve, reject) => {
     const isAudio      = mimetype.startsWith("audio/");
@@ -75,14 +77,17 @@ router.get("/:jobId", async (req, res) => {
   if (!address) return res.status(400).json({ error: "address required" });
 
   try {
+    console.log(`[chat] GET job #${jobId} for address ${address}`);
+    console.log(`[chat] ESCROW ADDRESS: ${process.env.VITE_ESCROW_CONTRACT_ADDRESS}`);
+
     const job = await getJobFromChain(jobId);
     if (!job) return res.status(404).json({ error: "Job not found on chain" });
 
-    const addr             = address.toLowerCase();
-    const zeroAddr         = "0x0000000000000000000000000000000000000000";
-    const freelancerExists = job.freelancer && job.freelancer !== zeroAddr;
+    const addr         = address.toLowerCase();
+    const zeroAddr     = "0x0000000000000000000000000000000000000000";
+    const hasFreelancer = job.freelancer && job.freelancer !== zeroAddr;
 
-    if (addr !== job.client && (!freelancerExists || addr !== job.freelancer)) {
+    if (addr !== job.client && (!hasFreelancer || addr !== job.freelancer)) {
       return res.status(403).json({ error: "Not a party to this job" });
     }
 
@@ -100,13 +105,16 @@ router.get("/:jobId", async (req, res) => {
 
 // ── POST /api/chat/:jobId ──────────────────────────────────────────
 router.post("/:jobId", upload.single("file"), async (req, res) => {
-  const { jobId }            = req.params;
-  const { sender, message }  = req.body;
+  const { jobId }           = req.params;
+  const { sender, message } = req.body;
 
   if (!sender) return res.status(400).json({ error: "sender required" });
   if (!message?.trim() && !req.file) return res.status(400).json({ error: "message or file required" });
 
   try {
+    console.log(`[chat] POST job #${jobId} from sender ${sender}`);
+    console.log(`[chat] ESCROW ADDRESS: ${process.env.VITE_ESCROW_CONTRACT_ADDRESS}`);
+
     const job = await getJobFromChain(jobId);
     if (!job) return res.status(404).json({ error: "Job not found on chain" });
 
