@@ -3,6 +3,9 @@ import { db } from "../db.js";
 import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
 import { Readable } from "stream";
+import { ethers } from "ethers";
+import dotenv from "dotenv";
+dotenv.config({ path: "../.env" });
 
 const router = express.Router();
 
@@ -12,6 +15,29 @@ cloudinary.config({
   api_key:    process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
+// Blockchain provider + minimal ABI to read job
+const RPC_URL = process.env.ARC_RPC_URL || "https://rpc.testnet.arc.network";
+const provider = new ethers.JsonRpcProvider(RPC_URL);
+const ESCROW_ABI = [
+  "function getJob(uint256 jobId) view returns (tuple(uint256 id, address client, address freelancer, uint256 totalAmount, uint256 platformFee, string title, string descriptionHash, uint8 status, uint256 createdAt, uint256 disputedAt, uint256 deadlineDuration, uint256 acceptedAt, uint256 clientSplitPercent, bool freelancerAgreedToSplit, tuple(string description, uint256 amount, uint8 status, string deliverableHash, uint256 submittedAt)[] milestones))",
+];
+const escrow = new ethers.Contract(process.env.VITE_ESCROW_CONTRACT_ADDRESS, ESCROW_ABI, provider);
+
+// Fetch job from chain
+async function getJobFromChain(jobId) {
+  try {
+    const job = await escrow.getJob(BigInt(jobId));
+    if (!job || job.id === 0n) return null;
+    return {
+      client:     job.client.toLowerCase(),
+      freelancer: job.freelancer.toLowerCase(),
+      status:     Number(job.status),
+    };
+  } catch {
+    return null;
+  }
+}
 
 // Multer — store in memory, max 10MB
 const upload = multer({
@@ -27,10 +53,9 @@ const upload = multer({
 // Helper: upload buffer to Cloudinary
 function uploadToCloudinary(buffer, mimetype, jobId) {
   return new Promise((resolve, reject) => {
-    const isAudio    = mimetype.startsWith("audio/");
-    const resourceType = isAudio ? "video" : "image"; // Cloudinary uses "video" for audio
-    const folder     = `freelance-arc/job-${jobId}`;
-
+    const isAudio      = mimetype.startsWith("audio/");
+    const resourceType = isAudio ? "video" : "image";
+    const folder       = `freelance-arc/job-${jobId}`;
     const stream = cloudinary.uploader.upload_stream(
       { folder, resource_type: resourceType },
       (error, result) => {
@@ -43,25 +68,21 @@ function uploadToCloudinary(buffer, mimetype, jobId) {
 }
 
 // ── GET /api/chat/:jobId ───────────────────────────────────────────
-// Returns all messages for a job — only for client or freelancer
 router.get("/:jobId", async (req, res) => {
-  const { jobId } = req.params;
+  const { jobId }   = req.params;
   const { address } = req.query;
 
   if (!address) return res.status(400).json({ error: "address required" });
 
   try {
-    // Verify sender is client or freelancer
-    const jobRow = await db.execute({
-      sql:  `SELECT client, freelancer FROM jobs WHERE job_id = ?`,
-      args: [jobId],
-    });
+    const job = await getJobFromChain(jobId);
+    if (!job) return res.status(404).json({ error: "Job not found on chain" });
 
-    if (jobRow.rows.length === 0) return res.status(404).json({ error: "Job not found" });
+    const addr             = address.toLowerCase();
+    const zeroAddr         = "0x0000000000000000000000000000000000000000";
+    const freelancerExists = job.freelancer && job.freelancer !== zeroAddr;
 
-    const { client, freelancer } = jobRow.rows[0];
-    const addr = address.toLowerCase();
-    if (addr !== client && addr !== freelancer) {
+    if (addr !== job.client && (!freelancerExists || addr !== job.freelancer)) {
       return res.status(403).json({ error: "Not a party to this job" });
     }
 
@@ -78,36 +99,33 @@ router.get("/:jobId", async (req, res) => {
 });
 
 // ── POST /api/chat/:jobId ──────────────────────────────────────────
-// Send a message (text, image, or audio)
 router.post("/:jobId", upload.single("file"), async (req, res) => {
-  const { jobId }  = req.params;
-  const { sender, message } = req.body;
+  const { jobId }            = req.params;
+  const { sender, message }  = req.body;
 
   if (!sender) return res.status(400).json({ error: "sender required" });
   if (!message?.trim() && !req.file) return res.status(400).json({ error: "message or file required" });
 
   try {
-    // Verify sender is client or freelancer
-    const jobRow = await db.execute({
-      sql:  `SELECT client, freelancer, status FROM jobs WHERE job_id = ?`,
-      args: [jobId],
-    });
+    const job = await getJobFromChain(jobId);
+    if (!job) return res.status(404).json({ error: "Job not found on chain" });
 
-    if (jobRow.rows.length === 0) return res.status(404).json({ error: "Job not found" });
+    const addr     = sender.toLowerCase();
+    const zeroAddr = "0x0000000000000000000000000000000000000000";
 
-    const { client, freelancer, status } = jobRow.rows[0];
-    const addr = sender.toLowerCase();
-    if (addr !== client && addr !== freelancer) {
+    if (addr !== job.client && addr !== job.freelancer) {
       return res.status(403).json({ error: "Not a party to this job" });
     }
-    if (Number(status) !== 1) {
+    if (job.status !== 1) {
       return res.status(400).json({ error: "Chat only available for active jobs" });
+    }
+    if (job.freelancer === zeroAddr) {
+      return res.status(400).json({ error: "No freelancer assigned yet" });
     }
 
     let file_url  = null;
     let file_type = null;
 
-    // Upload file to Cloudinary if provided
     if (req.file) {
       const result = await uploadToCloudinary(req.file.buffer, req.file.mimetype, jobId);
       file_url  = result.secure_url;
